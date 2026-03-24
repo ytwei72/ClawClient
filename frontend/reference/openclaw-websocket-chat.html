@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenClaw WebSocket Chat</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1117; color: #e2e8f0;
+      height: 100vh; display: flex; flex-direction: column;
+    }
+    header {
+      padding: 14px 24px; background: #1a1d27;
+      border-bottom: 1px solid #2d3748;
+      display: flex; align-items: center; gap: 10px;
+    }
+    header h1 { font-size: 1.05rem; font-weight: 600; }
+    .ws-status {
+      margin-left: auto; font-size: 0.75rem; padding: 3px 12px;
+      border-radius: 20px; border: 1px solid #4a5568; color: #a0aec0;
+      background: #2d3748; transition: all 0.2s;
+    }
+    .ws-status.connected { color: #68d391; border-color: #38a169; background: #1c4532; }
+    .ws-status.connecting { color: #f6e05e; border-color: #d69e2e; background: #2d2a14; }
+    .ws-status.error { color: #fc8181; border-color: #c53030; background: #2d1515; }
+
+    .config-bar {
+      display: flex; gap: 8px; padding: 10px 24px;
+      background: #161922; border-bottom: 1px solid #2d3748;
+      flex-wrap: wrap; align-items: center;
+    }
+    .config-bar label { font-size: 0.78rem; color: #a0aec0; }
+    .config-bar input, .config-bar select {
+      background: #1a1d27; border: 1px solid #2d3748;
+      color: #e2e8f0; padding: 5px 10px;
+      border-radius: 6px; font-size: 0.82rem; outline: none;
+    }
+    .config-bar input:focus, .config-bar select:focus { border-color: #4299e1; }
+    #connectBtn {
+      background: #2b6cb0; color: #fff; border: none;
+      padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 0.82rem;
+    }
+    #connectBtn:hover { background: #2c5282; }
+    #connectBtn.disconnect { background: #742a2a; }
+    #connectBtn.disconnect:hover { background: #9b2c2c; }
+
+    #messages {
+      flex: 1; overflow-y: auto; padding: 20px 24px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .msg { max-width: 75%; padding: 10px 14px; border-radius: 12px;
+      font-size: 0.88rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+    .msg .lbl { font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; opacity: 0.55; margin-bottom: 3px; }
+    .msg.user { align-self: flex-end; background: #2b6cb0; color: #fff; border-bottom-right-radius: 3px; }
+    .msg.assistant { align-self: flex-start; background: #1a1d27;
+      border: 1px solid #2d3748; border-bottom-left-radius: 3px; }
+    .msg.error { align-self: center; background: #742a2a;
+      border: 1px solid #e53e3e; color: #fed7d7; font-size: 0.8rem; }
+    .msg.system { align-self: center; background: transparent;
+      border: 1px dashed #4a5568; color: #718096; font-size: 0.76rem;
+      text-align: center; padding: 5px 12px; }
+    .msg.debug { align-self: flex-start; background: #1a202c;
+      border: 1px solid #4a5568; color: #718096; font-size: 0.72rem;
+      font-family: monospace; max-width: 90%; }
+    .typing::after { content: "▋"; animation: blink 0.75s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    .input-area {
+      padding: 14px 24px; background: #1a1d27;
+      border-top: 1px solid #2d3748;
+      display: flex; gap: 8px; align-items: flex-end;
+    }
+    #userInput {
+      flex: 1; background: #0f1117; border: 1px solid #2d3748;
+      color: #e2e8f0; padding: 9px 13px; border-radius: 10px;
+      font-size: 0.88rem; resize: none; min-height: 40px; max-height: 110px;
+      outline: none; font-family: inherit; line-height: 1.5;
+    }
+    #userInput:focus { border-color: #4299e1; }
+    #sendBtn {
+      background: #2b6cb0; color: #fff; border: none;
+      padding: 9px 18px; border-radius: 10px; cursor: pointer; font-size: 0.88rem;
+    }
+    #sendBtn:disabled { background: #4a5568; cursor: not-allowed; }
+    #debugToggle {
+      background: #2d3748; color: #a0aec0; border: none;
+      padding: 9px 12px; border-radius: 10px; cursor: pointer; font-size: 0.8rem;
+    }
+    #messages::-webkit-scrollbar { width: 5px; }
+    #messages::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 3px; }
+
+    /* Protocol flow diagram strip */
+    .proto-hint {
+      font-size: 0.72rem; color: #4a5568; padding: 4px 24px 6px;
+      background: #161922; border-bottom: 1px solid #1a202c;
+      font-family: monospace; white-space: nowrap; overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <span>🦞</span>
+  <h1>OpenClaw WebSocket Chat</h1>
+  <span class="ws-status" id="wsStatus">● 未连接</span>
+</header>
+
+<div class="config-bar">
+  <label>Gateway URL</label>
+  <input type="text" id="gwUrl" value="ws://127.0.0.1:18789" style="width:220px" />
+  <label>Token</label>
+  <input type="password" id="gwToken" placeholder="OPENCLAW_GATEWAY_TOKEN" style="width:180px" />
+  <label>Agent</label>
+  <input type="text" id="agentId" value="main" style="width:80px" />
+  <button id="connectBtn">连接</button>
+</div>
+
+<!-- 协议流程提示 -->
+<div class="proto-hint" id="protoHint">
+  协议流程：服务端→ connect.challenge &nbsp;→&nbsp; 客户端→ connect(req) &nbsp;→&nbsp; 服务端→ hello-ok &nbsp;→&nbsp; 发送 chat.send &nbsp;→&nbsp; 监听 agent 事件
+</div>
+
+<div id="messages">
+  <div class="msg system">填写 Gateway URL 和 Token 后点击「连接」。<br>
+  无需开启 HTTP 端点，直接使用原生 WebSocket 协议。</div>
+</div>
+
+<div class="input-area">
+  <textarea id="userInput" placeholder="输入消息，Enter 发送（Shift+Enter 换行）" rows="1" disabled></textarea>
+  <button id="debugToggle" title="显示/隐藏协议调试帧">调试</button>
+  <button id="sendBtn" disabled>发送</button>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  OpenClaw WebSocket 客户端
+//  协议版本: v3
+//  参考文档: https://docs.openclaw.ai/gateway/protocol
+// ═══════════════════════════════════════════════════════
+
+let ws = null;
+let connected = false;
+let showDebug = false;
+let pendingAssistantEl = null;  // 流式输出占位元素
+let reqCounter = 0;
+
+// ── 工具：生成唯一请求 ID ─────────────────────────────
+function genId() {
+  return `web-${Date.now()}-${++reqCounter}`;
+}
+
+// ── 工具：生成稳定的设备 ID（基于 localStorage）────────
+function getDeviceId() {
+  let id = localStorage.getItem('openclaw_device_id');
+  if (!id) {
+    id = 'webdev-' + Math.random().toString(36).slice(2, 10);
+    localStorage.setItem('openclaw_device_id', id);
+  }
+  return id;
+}
+
+// ── DOM ───────────────────────────────────────────────
+const messagesEl  = document.getElementById('messages');
+const userInput   = document.getElementById('userInput');
+const sendBtn     = document.getElementById('sendBtn');
+const connectBtn  = document.getElementById('connectBtn');
+const wsStatus    = document.getElementById('wsStatus');
+const debugToggle = document.getElementById('debugToggle');
+
+// ── 消息渲染 ──────────────────────────────────────────
+function appendMsg(role, text, opts = {}) {
+  const el = document.createElement('div');
+  el.className = `msg ${role}`;
+  if (role === 'user' || role === 'assistant') {
+    const lbl = document.createElement('div');
+    lbl.className = 'lbl';
+    lbl.textContent = role === 'user' ? '你' : 'OpenClaw';
+    el.appendChild(lbl);
+  }
+  const body = document.createElement('span');
+  body.textContent = text;
+  el.appendChild(body);
+  if (opts.typing) el.classList.add('typing');
+  messagesEl.appendChild(el);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return { el, body };
+}
+
+function appendDebug(label, data) {
+  if (!showDebug) return;
+  const el = document.createElement('div');
+  el.className = 'msg debug';
+  el.dataset.debug = '1';
+  el.textContent = `[${label}] ` + JSON.stringify(data, null, 2);
+  messagesEl.appendChild(el);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// ── 状态指示 ──────────────────────────────────────────
+function setStatus(state, text) {
+  wsStatus.className = `ws-status ${state}`;
+  wsStatus.textContent = `● ${text}`;
+}
+
+// ── 连接 WebSocket ────────────────────────────────────
+function connect() {
+  const url   = document.getElementById('gwUrl').value.trim();
+  const token = document.getElementById('gwToken').value.trim();
+
+  setStatus('connecting', '连接中…');
+  appendMsg('system', `正在连接 ${url} …`);
+
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    appendMsg('system', 'WebSocket 已建立，等待服务端握手挑战…');
+    // 服务端会主动推送 connect.challenge，不需要主动发送
+  };
+
+  ws.onmessage = (event) => {
+    let frame;
+    try { frame = JSON.parse(event.data); }
+    catch { return; }
+
+    appendDebug('←', frame);
+    handleFrame(frame, token);
+  };
+
+  ws.onerror = (err) => {
+    setStatus('error', '连接错误');
+    appendMsg('error', 'WebSocket 连接失败。请检查 Gateway 是否运行，URL 是否正确。');
+  };
+
+  ws.onclose = (e) => {
+    connected = false;
+    setStatus('', '已断开');
+    userInput.disabled = true;
+    sendBtn.disabled = true;
+    connectBtn.textContent = '连接';
+    connectBtn.className = '';
+    appendMsg('system', `连接已关闭 (code: ${e.code})`);
+  };
+}
+
+// ── 处理接收到的帧 ────────────────────────────────────
+function handleFrame(frame, token) {
+  // 1. 服务端握手挑战 → 我们回复 connect 请求
+  //    文档: "First frame must be a connect request"
+  //    实际流程: 服务端先推 connect.challenge，客户端再发 connect
+  if (frame.type === 'event' && frame.event === 'connect.challenge') {
+    appendMsg('system', `收到握手挑战 (nonce: ${frame.payload?.nonce?.slice(0, 8)}…)`);
+    sendConnect(token, frame.payload);
+    return;
+  }
+
+  // 2. 握手响应
+  if (frame.type === 'res' && frame.payload?.type === 'hello-ok') {
+    connected = true;
+    setStatus('connected', '已连接');
+    connectBtn.textContent = '断开';
+    connectBtn.className = 'disconnect';
+    userInput.disabled = false;
+    sendBtn.disabled = false;
+    appendMsg('system', `握手成功，协议版本 v${frame.payload.protocol}。可以开始对话了。`);
+    // 如有 deviceToken 建议持久化
+    if (frame.payload.auth?.deviceToken) {
+      localStorage.setItem('openclaw_device_token', frame.payload.auth.deviceToken);
+    }
+    return;
+  }
+
+  // 3. 连接被拒
+  if (frame.type === 'res' && frame.ok === false) {
+    setStatus('error', '认证失败');
+    appendMsg('error', `连接被拒绝: ${JSON.stringify(frame.error)}`);
+    return;
+  }
+
+  // 4. Agent 回复事件（流式输出的核心）
+  //    文档: chat interface uses "chat.send / chat event protocol"
+  //    事件名通常为 "agent" 或 "message"，payload 包含 text/delta
+  if (frame.type === 'event') {
+    const ev = frame.event;
+
+    // 流式文本 delta
+    if (ev === 'agent' || ev === 'message' || ev === 'chat') {
+      const p = frame.payload ?? {};
+
+      // 流式 delta（部分文本）
+      if (p.delta !== undefined) {
+        if (!pendingAssistantEl) {
+          const r = appendMsg('assistant', '', { typing: true });
+          pendingAssistantEl = r;
+        }
+        pendingAssistantEl.body.textContent += p.delta;
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      // 完整文本（非流式 or 流式结束）
+      if (p.text !== undefined && p.delta === undefined) {
+        if (pendingAssistantEl) {
+          pendingAssistantEl.el.classList.remove('typing');
+          pendingAssistantEl.body.textContent = p.text;
+          pendingAssistantEl = null;
+        } else {
+          appendMsg('assistant', p.text);
+        }
+      }
+
+      // 流结束信号
+      if (p.done === true || p.finished === true) {
+        if (pendingAssistantEl) {
+          pendingAssistantEl.el.classList.remove('typing');
+          pendingAssistantEl = null;
+        }
+        sendBtn.disabled = false;
+      }
+    }
+
+    // typing 指示器（agent 开始思考）
+    if (ev === 'typing' || ev === 'agent.start') {
+      if (!pendingAssistantEl) {
+        pendingAssistantEl = appendMsg('assistant', '', { typing: true });
+      }
+    }
+  }
+}
+
+// ── 发送 connect 握手帧 ───────────────────────────────
+//   参考文档 schema: minProtocol/maxProtocol, role, scopes, auth, device
+function sendConnect(token, challenge) {
+  const deviceId = getDeviceId();
+
+  // 简化版签名：实际生产中应使用 ECDSA keypair 签名 nonce
+  // 文档指出 loopback 连接可 auto-approve，设备签名可简化
+  const connectReq = {
+    type: 'req',
+    id: genId(),
+    method: 'connect',
+    params: {
+      minProtocol: 3,
+      maxProtocol: 3,
+      client: {
+        id: 'web-chat-client',
+        version: '1.0.0',
+        platform: 'web',
+        mode: 'operator'
+      },
+      role: 'operator',
+      scopes: ['operator.read', 'operator.write'],
+      caps: [],
+      commands: [],
+      permissions: {},
+      auth: { token: token || undefined },
+      locale: navigator.language || 'zh-CN',
+      userAgent: `openclaw-web/1.0.0`,
+      // device 字段：loopback 环境下可省略签名，非本地需完整签名
+      device: {
+        id: deviceId,
+        // 生产环境应提供 publicKey + signature + signedAt + nonce
+        // loopback auto-approve 时可不填，服务端会根据 allowInsecureAuth 决定
+        ...(challenge?.nonce ? { nonce: challenge.nonce } : {})
+      }
+    }
+  };
+
+  appendDebug('→', connectReq);
+  ws.send(JSON.stringify(connectReq));
+}
+
+// ── 发送消息（chat.send RPC）─────────────────────────
+//   文档: "chat interface uses the same WebSocket chat.send protocol"
+function sendMessage(text) {
+  const agentId = document.getElementById('agentId').value.trim() || 'main';
+
+  const req = {
+    type: 'req',
+    id: genId(),
+    method: 'chat.send',
+    params: {
+      agentId: agentId,
+      text: text,
+      // idempotencyKey 用于防止重复提交（文档要求 side-effecting 方法提供）
+      idempotencyKey: `msg-${Date.now()}`
+    }
+  };
+
+  appendDebug('→', req);
+  ws.send(JSON.stringify(req));
+}
+
+// ── 主发送逻辑 ────────────────────────────────────────
+function handleSend() {
+  const text = userInput.value.trim();
+  if (!text || !connected) return;
+
+  appendMsg('user', text);
+  userInput.value = '';
+  userInput.style.height = 'auto';
+  sendBtn.disabled = true;
+
+  // 预置 typing 占位
+  pendingAssistantEl = appendMsg('assistant', '', { typing: true });
+
+  sendMessage(text);
+}
+
+// ── 连接/断开按钮 ─────────────────────────────────────
+connectBtn.addEventListener('click', () => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.close();
+  } else {
+    connect();
+  }
+});
+
+// ── 输入框事件 ────────────────────────────────────────
+sendBtn.addEventListener('click', handleSend);
+userInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+});
+userInput.addEventListener('input', () => {
+  userInput.style.height = 'auto';
+  userInput.style.height = Math.min(userInput.scrollHeight, 110) + 'px';
+});
+
+// ── 调试开关 ──────────────────────────────────────────
+debugToggle.addEventListener('click', () => {
+  showDebug = !showDebug;
+  debugToggle.style.background = showDebug ? '#2d6a4f' : '#2d3748';
+  debugToggle.style.color = showDebug ? '#68d391' : '#a0aec0';
+  if (!showDebug) {
+    document.querySelectorAll('[data-debug]').forEach(el => el.remove());
+  }
+});
+</script>
+
+</body>
+</html>

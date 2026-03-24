@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenClaw Chat Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 16px 24px;
+      background: #1a1d27;
+      border-bottom: 1px solid #2d3748;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    header span.logo { font-size: 1.5rem; }
+    header h1 { font-size: 1.1rem; font-weight: 600; color: #f7fafc; }
+    header .badge {
+      margin-left: auto;
+      font-size: 0.72rem;
+      padding: 3px 10px;
+      border-radius: 20px;
+      background: #2d3748;
+      color: #68d391;
+      border: 1px solid #38a169;
+    }
+
+    .config-bar {
+      display: flex;
+      gap: 8px;
+      padding: 10px 24px;
+      background: #161922;
+      border-bottom: 1px solid #2d3748;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .config-bar label { font-size: 0.78rem; color: #a0aec0; }
+    .config-bar input, .config-bar select {
+      background: #1a1d27;
+      border: 1px solid #2d3748;
+      color: #e2e8f0;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      outline: none;
+    }
+    .config-bar input:focus, .config-bar select:focus {
+      border-color: #4299e1;
+    }
+    .config-bar input[type="text"] { width: 220px; }
+    .config-bar input[type="password"] { width: 180px; }
+
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .msg {
+      max-width: 72%;
+      padding: 12px 16px;
+      border-radius: 14px;
+      line-height: 1.6;
+      font-size: 0.9rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: #2b6cb0;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .msg.assistant {
+      align-self: flex-start;
+      background: #1a1d27;
+      border: 1px solid #2d3748;
+      color: #e2e8f0;
+      border-bottom-left-radius: 4px;
+    }
+    .msg.error {
+      align-self: center;
+      background: #742a2a;
+      border: 1px solid #e53e3e;
+      color: #fed7d7;
+      font-size: 0.82rem;
+    }
+    .msg.system-info {
+      align-self: center;
+      background: transparent;
+      border: 1px dashed #4a5568;
+      color: #718096;
+      font-size: 0.78rem;
+      text-align: center;
+      padding: 6px 14px;
+    }
+    .msg .role-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      opacity: 0.6;
+      margin-bottom: 4px;
+    }
+    .typing-cursor::after {
+      content: "▋";
+      animation: blink 0.8s infinite;
+      font-size: 0.8em;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    .input-area {
+      padding: 16px 24px;
+      background: #1a1d27;
+      border-top: 1px solid #2d3748;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    #userInput {
+      flex: 1;
+      background: #0f1117;
+      border: 1px solid #2d3748;
+      color: #e2e8f0;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      resize: none;
+      min-height: 42px;
+      max-height: 120px;
+      outline: none;
+      font-family: inherit;
+      line-height: 1.5;
+    }
+    #userInput:focus { border-color: #4299e1; }
+    #sendBtn {
+      background: #2b6cb0;
+      color: #fff;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    #sendBtn:hover { background: #2c5282; }
+    #sendBtn:disabled { background: #4a5568; cursor: not-allowed; }
+    #clearBtn {
+      background: #2d3748;
+      color: #a0aec0;
+      border: none;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    #clearBtn:hover { background: #4a5568; }
+
+    /* Scrollbar styling */
+    #messages::-webkit-scrollbar { width: 6px; }
+    #messages::-webkit-scrollbar-track { background: transparent; }
+    #messages::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="logo">🦞</span>
+  <h1>OpenClaw Chat</h1>
+  <span class="badge" id="streamBadge">● SSE Streaming</span>
+</header>
+
+<div class="config-bar">
+  <label>Gateway URL</label>
+  <input type="text" id="gatewayUrl" value="http://127.0.0.1:18789" placeholder="http://127.0.0.1:18789" />
+
+  <label>Token</label>
+  <input type="password" id="token" placeholder="YOUR_GATEWAY_TOKEN" />
+
+  <label>Agent ID</label>
+  <input type="text" id="agentId" value="main" style="width:100px" />
+
+  <label>Mode</label>
+  <select id="streamMode">
+    <option value="stream">流式 (SSE)</option>
+    <option value="sync">非流式</option>
+  </select>
+</div>
+
+<div id="messages">
+  <div class="msg system-info">
+    请填写上方的 Gateway URL 和 Token，然后开始对话。<br/>
+    确保已在 openclaw.json 中开启 <code>chatCompletions.enabled: true</code> 并重启 Gateway。
+  </div>
+</div>
+
+<div class="input-area">
+  <textarea id="userInput" placeholder="输入消息，按 Enter 发送（Shift+Enter 换行）" rows="1"></textarea>
+  <button id="clearBtn" title="清空对话">清空</button>
+  <button id="sendBtn">发送</button>
+</div>
+
+<script>
+  // ── 状态 ──────────────────────────────────────────────
+  const history = [];   // { role, content }[]
+  let isLoading = false;
+
+  // ── DOM ───────────────────────────────────────────────
+  const messagesEl  = document.getElementById('messages');
+  const userInput   = document.getElementById('userInput');
+  const sendBtn     = document.getElementById('sendBtn');
+  const clearBtn    = document.getElementById('clearBtn');
+  const streamBadge = document.getElementById('streamBadge');
+
+  function getConfig() {
+    return {
+      gatewayUrl : document.getElementById('gatewayUrl').value.replace(/\/$/, ''),
+      token      : document.getElementById('token').value,
+      agentId    : document.getElementById('agentId').value || 'main',
+      streaming  : document.getElementById('streamMode').value === 'stream',
+    };
+  }
+
+  // ── 渲染消息 ──────────────────────────────────────────
+  function appendMsg(role, text, extra = {}) {
+    const el = document.createElement('div');
+    el.className = `msg ${role}`;
+    if (role === 'user' || role === 'assistant') {
+      const lbl = document.createElement('div');
+      lbl.className = 'role-label';
+      lbl.textContent = role === 'user' ? '你' : 'OpenClaw';
+      el.appendChild(lbl);
+    }
+    const body = document.createElement('span');
+    body.textContent = text;
+    el.appendChild(body);
+    if (extra.typing) el.classList.add('typing-cursor');
+    messagesEl.appendChild(el);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return { el, body };
+  }
+
+  function removeTypingCursor(el) {
+    el.classList.remove('typing-cursor');
+  }
+
+  // ── 发送（非流式）────────────────────────────────────
+  async function sendSync(cfg, messages) {
+    const res = await fetch(`${cfg.gatewayUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${cfg.token}`,
+        'x-openclaw-agent-id': cfg.agentId,
+      },
+      body: JSON.stringify({
+        model: `openclaw:${cfg.agentId}`,
+        messages,
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText);
+      throw new Error(`HTTP ${res.status}: ${errText}`);
+    }
+
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content ?? '（空响应）';
+    return content;
+  }
+
+  // ── 发送（流式 SSE）──────────────────────────────────
+  async function sendStream(cfg, messages, onChunk) {
+    const res = await fetch(`${cfg.gatewayUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${cfg.token}`,
+        'x-openclaw-agent-id': cfg.agentId,
+      },
+      body: JSON.stringify({
+        model: `openclaw:${cfg.agentId}`,
+        messages,
+        stream: true,
+        // 传入 user 字段可让 Gateway 生成稳定的 session key，保持对话上下文
+        user: `webchat-session-${cfg.agentId}`,
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText);
+      throw new Error(`HTTP ${res.status}: ${errText}`);
+    }
+
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // 最后一行可能不完整，留给下次拼接
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (payload === '[DONE]') return fullText;
+
+        try {
+          const chunk = JSON.parse(payload);
+          const delta = chunk?.choices?.[0]?.delta?.content ?? '';
+          if (delta) {
+            fullText += delta;
+            onChunk(delta);
+          }
+        } catch {
+          // 忽略不完整的 JSON 行
+        }
+      }
+    }
+    return fullText;
+  }
+
+  // ── 主发送逻辑 ────────────────────────────────────────
+  async function handleSend() {
+    if (isLoading) return;
+    const text = userInput.value.trim();
+    if (!text) return;
+
+    const cfg = getConfig();
+    if (!cfg.token) {
+      appendMsg('error', '请先填写 Gateway Token');
+      return;
+    }
+
+    isLoading = true;
+    sendBtn.disabled = true;
+    userInput.value = '';
+
+    // 显示用户消息
+    appendMsg('user', text);
+    history.push({ role: 'user', content: text });
+
+    // 显示占位符
+    const { el: aEl, body: aBody } = appendMsg('assistant', '', { typing: true });
+
+    try {
+      if (cfg.streaming) {
+        // 流式：逐字追加
+        let accumulated = '';
+        await sendStream(cfg, [...history], (delta) => {
+          accumulated += delta;
+          aBody.textContent = accumulated;
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        });
+        removeTypingCursor(aEl);
+        history.push({ role: 'assistant', content: accumulated });
+      } else {
+        // 非流式
+        const reply = await sendSync(cfg, [...history]);
+        aBody.textContent = reply;
+        removeTypingCursor(aEl);
+        history.push({ role: 'assistant', content: reply });
+      }
+    } catch (err) {
+      aEl.remove();
+      let hint = '';
+      if (err.message.includes('404')) {
+        hint = '\n\n排查：请在 ~/.openclaw/openclaw.json 中开启 chatCompletions.enabled=true 并重启 Gateway。';
+      } else if (err.message.includes('401') || err.message.includes('403')) {
+        hint = '\n\n排查：Token 错误，请检查 Gateway Token 是否正确。';
+      } else if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+        hint = '\n\n排查：无法连接 Gateway，请确认 Gateway 正在运行且 URL 正确。';
+      }
+      appendMsg('error', `请求失败: ${err.message}${hint}`);
+    } finally {
+      isLoading = false;
+      sendBtn.disabled = false;
+      userInput.focus();
+    }
+  }
+
+  // ── 事件绑定 ──────────────────────────────────────────
+  sendBtn.addEventListener('click', handleSend);
+
+  userInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  });
+
+  // 自动调整输入框高度
+  userInput.addEventListener('input', () => {
+    userInput.style.height = 'auto';
+    userInput.style.height = Math.min(userInput.scrollHeight, 120) + 'px';
+  });
+
+  clearBtn.addEventListener('click', () => {
+    history.length = 0;
+    messagesEl.innerHTML = '';
+    appendMsg('system-info', '对话已清空，开始新的会话。');
+  });
+
+  document.getElementById('streamMode').addEventListener('change', (e) => {
+    streamBadge.textContent = e.target.value === 'stream' ? '● SSE Streaming' : '○ Sync';
+    streamBadge.style.color = e.target.value === 'stream' ? '#68d391' : '#f6ad55';
+    streamBadge.style.borderColor = e.target.value === 'stream' ? '#38a169' : '#dd6b20';
+  });
+</script>
+
+</body>
+</html>
