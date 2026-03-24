@@ -1,0 +1,2 @@
+# OpenAI 兼容 /v1/models 查询脚本依赖（与 pyproject.toml 对齐）
+httpx>=0.27,<1
