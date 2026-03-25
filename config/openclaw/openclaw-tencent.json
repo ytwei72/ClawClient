@@ -1,0 +1,355 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.3.13",
+    "lastTouchedAt": "2026-03-16T07:34:43.253Z"
+  },
+  "wizard": {
+    "lastRunAt": "2026-03-12T02:56:47.678Z",
+    "lastRunVersion": "2026.3.7",
+    "lastRunCommand": "doctor",
+    "lastRunMode": "local"
+  },
+  "auth": {
+    "profiles": {
+      "volcengine-coding-plan:default": {
+        "provider": "volcengine-coding-plan",
+        "mode": "api_key"
+      }
+    },
+    "order": {
+      "volcengine-coding-plan": [
+        "volcengine-coding-plan:default"
+      ]
+    }
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "volcengine-coding-plan": {
+        "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "apiKey": "4ff38093-6d60-470d-8d56-2cfa425725a2",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "doubao-seed-2.0-code",
+            "name": "Doubao Seed 2.0 Code",
+            "api": "openai-completions",
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "Kimi-K2.5",
+            "name": "Kimi-K2.5",
+            "api": "openai-completions",
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "MiniMax-M2.5",
+            "name": "MiniMax-M2.5",
+            "api": "openai-completions",
+            "reasoning": true,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "GLM-4.7",
+            "name": "GLM-4.7",
+            "api": "openai-completions",
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "DeepSeek-V3.2",
+            "name": "DeepSeek-V3.2",
+            "api": "openai-completions",
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "volcengine-coding-plan/MiniMax-M2.5"
+      },
+      "models": {
+        "volcengine-coding-plan/MiniMax-M2.5": {}
+      },
+      "workspace": "/root/.openclaw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      }
+    },
+    "list": [
+      {
+        "id": "main"
+      },
+      {
+        "id": "intel-officer",
+        "name": "intel-officer",
+        "workspace": "/root/.openclaw/workspace-intel-officer",
+        "agentDir": "/root/.openclaw/agents/intel-officer/agent"
+      },
+      {
+        "id": "gz-claw",
+        "name": "gz-claw",
+        "workspace": "/root/.openclaw/workspace-gz-claw",
+        "agentDir": "/root/.openclaw/agents/gz-claw/agent"
+      }
+    ]
+  },
+  "tools": {
+    "profile": "full",
+    "web": {
+      "search": {
+        "enabled": true,
+        "provider": "brave",
+        "apiKey": "BSA6e6QY8MsYPl3X0BOQZm50mIBYbCb"
+      }
+    },
+    "sessions": {
+      "visibility": "all"
+    }
+  },
+  "bindings": [
+    {
+      "type": "route",
+      "agentId": "intel-officer",
+      "match": {
+        "channel": "feishu",
+        "accountId": "main"
+      }
+    },
+    {
+      "type": "route",
+      "agentId": "gz-claw",
+      "match": {
+        "channel": "feishu",
+        "accountId": "gzclaw"
+      }
+    }
+  ],
+  "messages": {
+    "ackReactionScope": "group-mentions"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "session": {
+    "dmScope": "per-channel-peer"
+  },
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "appId": "cli_a93fe52c8bb89cc4",
+      "appSecret": "wI7AcYLBNeYS6dWMS3N7jfAfimCDy8OO",
+      "domain": "feishu",
+      "accounts": {
+        "main": {
+          "appId": "cli_a938a4ad38f8dbd7",
+          "appSecret": "dyba59oVS2qMhpfChyvrpcA4tB5nQ1ej",
+          "botName": "ApexClaw"
+        },
+        "default": {
+          "groupPolicy": "open"
+        },
+        "gzclaw": {
+          "appId": "cli_a93fe52c8bb89cc4",
+          "appSecret": "wI7AcYLBNeYS6dWMS3N7jfAfimCDy8OO",
+          "botName": "PadClaw"
+        }
+      },
+      "dmPolicy": "open",
+      "streaming": true,
+      "footer": {
+        "elapsed": true,
+        "status": true
+      },
+      "groupPolicy": "open",
+      "threadSession": true,
+      "requireMention": true,
+      "allowFrom": [
+        "*"
+      ],
+      "renderMode": "card",
+      "connectionMode": "websocket"
+    },
+    "qqbot": {
+      "enabled": true,
+      "appId": "1903163757",
+      "clientSecret": "kOq32mJExSlpjQt8"
+    }
+  },
+  "gateway": {
+    "port": 16232,
+    "mode": "local",
+    "bind": "loopback",
+    "controlUi": {
+      "allowedOrigins": [
+        "http://82.157.180.200:16232"
+      ],
+      "allowInsecureAuth": false,
+      "dangerouslyDisableDeviceAuth": false
+    },
+    "auth": {
+      "mode": "token",
+      "token": "1d8bb9d66e60b6a35e2c2d098811af129629def393969ed6"
+    },
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    }
+  },
+  "skills": {
+    "install": {
+      "nodeManager": "npm"
+    },
+    "entries": {
+      "tavily-search": {
+        "enabled": true,
+        "apiKey": "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"
+      }
+    }
+  },
+  "plugins": {
+    "entries": {
+      "feishu": {
+        "enabled": true
+      },
+      "qqbot": {
+        "enabled": true
+      },
+      "ddingtalk": {
+        "enabled": true
+      },
+      "wecom": {
+        "enabled": true
+      },
+      "adp-openclaw": {
+        "enabled": true
+      },
+      "skillhub": {
+        "enabled": true,
+        "config": {
+          "primaryCli": "skillhub",
+          "fallbackCli": "clawhub",
+          "primaryLabel": "cn-optimized",
+          "fallbackLabel": "public-registry"
+        }
+      }
+    },
+    "installs": {
+      "qqbot": {
+        "source": "npm",
+        "spec": "@sliverp/qqbot@1.5.1",
+        "installPath": "/root/.openclaw/extensions/qqbot",
+        "version": "1.5.1",
+        "resolvedName": "@sliverp/qqbot",
+        "resolvedVersion": "1.5.1",
+        "resolvedSpec": "@sliverp/qqbot@1.5.1",
+        "integrity": "sha512-2Y0ozV5Z6cpOu2WLKFPvddo0mQ1GUQ3Q7V/PNMlFz/NLrbjm2QQM4zFe/Sn+x9uF1Er/65NEIzpiC4SPeWM/1g==",
+        "shasum": "f4444aaf9c7887ea73512e9653c090addd667fc8",
+        "resolvedAt": "2026-03-08T14:20:56.176Z",
+        "installedAt": "2026-03-08T14:21:54.759Z"
+      },
+      "ddingtalk": {
+        "source": "npm",
+        "spec": "@largezhou/ddingtalk",
+        "installPath": "/root/.openclaw/extensions/ddingtalk",
+        "version": "1.3.2",
+        "resolvedName": "@largezhou/ddingtalk",
+        "resolvedVersion": "1.3.2",
+        "resolvedSpec": "@largezhou/ddingtalk@1.3.2",
+        "integrity": "sha512-WizzhkxDVZidTub9SAEQtzYeGtw2c3sMfBCfBVnTwutYpniuD/u0zNobRu4IVr+4sMicU1MA3LvIKNjWpbaR3Q==",
+        "shasum": "453c3fe0deecfd0d7da6776904f2c1439a60c107",
+        "resolvedAt": "2026-03-08T14:22:01.712Z",
+        "installedAt": "2026-03-08T14:22:15.933Z"
+      },
+      "wecom": {
+        "source": "npm",
+        "spec": "@mocrane/wecom",
+        "installPath": "/root/.openclaw/extensions/wecom",
+        "version": "2026.3.9",
+        "resolvedName": "@mocrane/wecom",
+        "resolvedVersion": "2026.3.9",
+        "resolvedSpec": "@mocrane/wecom@2026.3.9",
+        "integrity": "sha512-ZUn4UWIRoc877LozznbCHiQf451QmpQdP2iFGuwWzirNwvT6Iq7eobP9+wCW+gqvBUZBUDQr3OForhFD11XXnw==",
+        "shasum": "1f3654fa5d0e6e2069e880b7111bab80855d8343",
+        "resolvedAt": "2026-03-08T14:22:24.184Z",
+        "installedAt": "2026-03-08T14:22:31.737Z"
+      },
+      "adp-openclaw": {
+        "source": "npm",
+        "spec": "adp-openclaw",
+        "installPath": "/root/.openclaw/extensions/adp-openclaw",
+        "version": "0.0.61",
+        "resolvedName": "adp-openclaw",
+        "resolvedVersion": "0.0.61",
+        "resolvedSpec": "adp-openclaw@0.0.61",
+        "integrity": "sha512-0Yjm4l3nLeWbL2mL6ZWOHFqMpxNswKT/4FE6Ir49+DXkD4mqmMBYqSX5i6FAsOpkYJKSb5GPYYl1fYPHGpTwGQ==",
+        "shasum": "0a8f0f579bdb7095d7d6c45191fabc35c3125603",
+        "resolvedAt": "2026-03-08T14:22:40.157Z",
+        "installedAt": "2026-03-08T14:22:41.484Z"
+      }
+    }
+  }
+}
