@@ -1,1 +1,10 @@
 .env
+
+# Android (Gradle / Android Studio)
+android/**/build/
+android/.gradle/
+android/**/local.properties
+android/.idea/
+android/*.iml
+android/captures/
+android/.kotlin/
