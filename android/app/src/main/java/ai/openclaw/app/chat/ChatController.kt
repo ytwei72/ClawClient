@@ -436,7 +436,7 @@ class ChatController(
             Log.i(
               tag,
               "refresh history loaded sessionId=${history.sessionId} thinking=${history.thinkingLevel} " +
-                "messages=${history.messages.size} historyRaw=${preview(historyJson, 700)} " +
+                "messages=${history.messages.size} historyRaw=${preview(historyJson, 200)} " +
                 "parsed=${summarizeMessages(history.messages)}",
             )
           } catch (_: Throwable) {

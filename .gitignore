@@ -2,6 +2,7 @@
 
 # Android (Gradle / Android Studio)
 android/**/build/
+android/**/play/
 android/.gradle/
 android/**/local.properties
 android/.idea/

@@ -34,6 +34,7 @@
 ---
 
 ### 候选项二：`yuga-hashimoto/openclaw-assistant`（语音体验突出的第三方）
+https://github.com/yuga-hashimoto/openclaw-assistant
 
 深度集成 Android 系统，偏「真实 AI 助手」形态：
 

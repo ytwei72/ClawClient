@@ -18,20 +18,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -73,19 +68,11 @@ fun ChatSheetContent(viewModel: MainViewModel) {
   val thinkingLevel by viewModel.chatThinkingLevel.collectAsState()
   val streamingAssistantText by viewModel.chatStreamingAssistantText.collectAsState()
   val pendingToolCalls by viewModel.chatPendingToolCalls.collectAsState()
-  val sessions by viewModel.chatSessions.collectAsState()
   val gatewayAgents by viewModel.chatGatewayAgents.collectAsState()
   val isConnected by viewModel.isConnected.collectAsState()
-  var showAllSessions by remember { mutableStateOf(false) }
-  var selectedAgentId by remember { mutableStateOf<String?>(null) }
 
   LaunchedEffect(mainSessionKey) {
     viewModel.loadChat(mainSessionKey)
-  }
-
-  LaunchedEffect(sessionKey) {
-    // Keep picker in sync when the user switches sessions directly.
-    selectedAgentId = agentIdFromSessionKey(sessionKey)
   }
 
   LaunchedEffect(isConnected) {
@@ -119,6 +106,15 @@ fun ChatSheetContent(viewModel: MainViewModel) {
       }
     }
 
+  val assistantLabel =
+    remember(sessionKey, gatewayAgents) {
+      resolveAssistantLabel(
+        sessionKey = sessionKey,
+        selectedAgentId = null,
+        agents = gatewayAgents,
+      )
+    }
+
   Column(
     modifier =
       Modifier
@@ -126,134 +122,6 @@ fun ChatSheetContent(viewModel: MainViewModel) {
         .padding(horizontal = 20.dp, vertical = 12.dp),
     verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
-    ChatGatewaySelector(
-      agents = gatewayAgents,
-      sessionKey = sessionKey,
-      mainSessionKey = mainSessionKey,
-      onSelectGatewayDefault = {
-        val key = mainSessionKey.trim().ifEmpty { "main" }
-        selectedAgentId = agentIdFromSessionKey(key)
-        viewModel.switchChatSession(key)
-      },
-      onSelectAgent = { agentId ->
-        selectedAgentId = agentId.trim().ifEmpty { null }
-        viewModel.switchChatSession(chatSessionKeyForAgent(agentId))
-      },
-    )
-
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-      Text(
-        text = "最近会话",
-        style = mobileCaption2.copy(letterSpacing = 0.5.sp, fontWeight = FontWeight.SemiBold),
-        color = mobileTextSecondary,
-      )
-      TextButton(
-        onClick = { showAllSessions = true },
-        enabled = sessions.isNotEmpty() || mainSessionKey.isNotBlank(),
-      ) {
-        Text("全部历史…", style = mobileCaption1, color = mobileAccent)
-      }
-    }
-
-    ChatThreadSelector(
-      sessionKey = sessionKey,
-      sessions = sessions,
-      mainSessionKey = mainSessionKey,
-      onSelectSession = { key -> viewModel.switchChatSession(key) },
-    )
-
-    if (showAllSessions) {
-      val allSessions =
-        remember(sessions, mainSessionKey, selectedAgentId) {
-          resolveAllSessionChoicesForAgent(
-            sessions = sessions,
-            mainSessionKey = mainSessionKey,
-            agentId = selectedAgentId,
-          )
-        }
-      val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-      ModalBottomSheet(
-        onDismissRequest = { showAllSessions = false },
-        sheetState = sheetState,
-        containerColor = mobileCardSurface,
-        contentColor = mobileText,
-        tonalElevation = 0.dp,
-      ) {
-        Column(
-          modifier =
-            Modifier
-              .fillMaxWidth()
-              .padding(horizontal = 16.dp, vertical = 8.dp),
-        ) {
-          val agentLabel =
-            remember(selectedAgentId, gatewayAgents) {
-              val id = selectedAgentId?.trim().orEmpty()
-              if (id.isEmpty()) return@remember null
-              val match = gatewayAgents.firstOrNull { it.id.trim() == id }
-              val name = match?.name?.trim().orEmpty()
-              val emoji = match?.emoji?.trim().orEmpty()
-              buildString {
-                if (emoji.isNotEmpty()) {
-                  append(emoji)
-                  append(' ')
-                }
-                append(if (name.isNotEmpty()) name else id)
-              }
-            }
-          Text(
-            text = if (agentLabel != null) "历史会话 · $agentLabel" else "历史会话",
-            style = mobileHeadline,
-            color = mobileText,
-          )
-          Text(
-            text = "选择与不同渠道或线程对应的会话键；智能体会话通常为 agent:<id>:main。",
-            style = mobileCaption1,
-            color = mobileTextSecondary,
-          )
-          Spacer(modifier = Modifier.height(8.dp))
-          LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-          ) {
-            items(items = allSessions, key = { it.key }) { entry ->
-              val active = entry.key == sessionKey
-              Surface(
-                onClick = {
-                  viewModel.switchChatSession(entry.key)
-                  showAllSessions = false
-                },
-                shape = RoundedCornerShape(12.dp),
-                color = if (active) mobileAccent.copy(alpha = 0.22f) else mobileCardSurface,
-                border = BorderStroke(1.dp, if (active) mobileAccentBorderStrong else mobileBorderStrong),
-              ) {
-                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-                  Text(
-                    text = friendlySessionName(entry.displayName ?: entry.key),
-                    style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
-                    color = mobileText,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                  )
-                  Text(
-                    text = entry.key,
-                    style = mobileCaption2,
-                    color = mobileTextSecondary,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                  )
-                }
-              }
-            }
-          }
-          Spacer(modifier = Modifier.height(24.dp))
-        }
-      }
-    }
-
     if (!errorText.isNullOrBlank()) {
       ChatErrorRail(errorText = errorText!!)
     }
@@ -263,6 +131,7 @@ fun ChatSheetContent(viewModel: MainViewModel) {
       pendingRunCount = pendingRunCount,
       pendingToolCalls = pendingToolCalls,
       streamingAssistantText = streamingAssistantText,
+      assistantLabel = assistantLabel,
       healthOk = healthOk,
       modifier = Modifier.weight(1f, fill = true),
     )
@@ -300,6 +169,33 @@ fun ChatSheetContent(viewModel: MainViewModel) {
   }
 }
 
+@Composable
+private fun SessionRowItem(title: String, subtitle: String, active: Boolean, onClick: () -> Unit) {
+  Surface(
+    onClick = onClick,
+    shape = RoundedCornerShape(12.dp),
+    color = if (active) mobileAccent.copy(alpha = 0.22f) else mobileCardSurface,
+    border = BorderStroke(1.dp, if (active) mobileAccentBorderStrong else mobileBorderStrong),
+  ) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+      Text(
+        text = title,
+        style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
+        color = mobileText,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+      Text(
+        text = subtitle,
+        style = mobileCaption2,
+        color = mobileTextSecondary,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+  }
+}
+
 private fun chatSessionKeyForAgent(agentId: String): String {
   val id = agentId.trim()
   return if (id.isEmpty()) "main" else "agent:$id:main"
@@ -309,6 +205,17 @@ private fun gatewayMainSessionChipLabel(mainSessionKey: String): String {
   val m = mainSessionKey.trim()
   if (m.isEmpty() || m == "main") return "默认 (main)"
   return "默认 · ${friendlySessionName(m)}"
+}
+
+private fun resolveAssistantLabel(
+  sessionKey: String,
+  selectedAgentId: String?,
+  agents: List<ChatGatewayAgent>,
+): String {
+  val currentAgentId = selectedAgentId?.trim().takeIf { !it.isNullOrEmpty() } ?: agentIdFromSessionKey(sessionKey)
+  if (currentAgentId.isNullOrEmpty()) return "助手"
+  val match = agents.firstOrNull { it.id.trim() == currentAgentId } ?: return currentAgentId
+  return match.name?.trim()?.takeIf { it.isNotEmpty() } ?: match.id
 }
 
 @Composable

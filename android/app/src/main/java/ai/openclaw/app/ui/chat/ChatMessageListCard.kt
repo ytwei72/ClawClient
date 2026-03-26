@@ -32,6 +32,7 @@ fun ChatMessageListCard(
   pendingRunCount: Int,
   pendingToolCalls: List<ChatPendingToolCall>,
   streamingAssistantText: String?,
+  assistantLabel: String,
   healthOk: Boolean,
   modifier: Modifier = Modifier,
 ) {
@@ -62,24 +63,24 @@ fun ChatMessageListCard(
       // So we emit newest items first: streaming → tools → typing → messages (newest→oldest).
       if (!stream.isNullOrEmpty()) {
         item(key = "stream") {
-          ChatStreamingAssistantBubble(text = stream)
+          ChatStreamingAssistantBubble(text = stream, assistantLabel = assistantLabel)
         }
       }
 
       if (pendingToolCalls.isNotEmpty()) {
         item(key = "tools") {
-          ChatPendingToolsBubble(toolCalls = pendingToolCalls)
+          ChatPendingToolsBubble(toolCalls = pendingToolCalls, assistantLabel = assistantLabel)
         }
       }
 
       if (pendingRunCount > 0) {
         item(key = "typing") {
-          ChatTypingIndicatorBubble()
+          ChatTypingIndicatorBubble(assistantLabel = assistantLabel)
         }
       }
 
       items(items = displayMessages, key = { it.id }) { message ->
-        ChatMessageBubble(message = message)
+        ChatMessageBubble(message = message, assistantLabel = assistantLabel)
       }
     }
 

@@ -5,11 +5,13 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
@@ -18,17 +20,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ScreenShare
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
@@ -45,8 +53,14 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ai.openclaw.app.MainViewModel
+import ai.openclaw.app.chat.ChatGatewayAgent
+import ai.openclaw.app.chat.ChatSessionEntry
+import ai.openclaw.app.ui.chat.agentIdFromSessionKey
+import ai.openclaw.app.ui.chat.friendlySessionName
+import ai.openclaw.app.ui.chat.resolveAllSessionChoicesForAgent
 
 private enum class HomeTab(
   val label: String,
@@ -72,6 +86,7 @@ fun PostOnboardingTabs(viewModel: MainViewModel, modifier: Modifier = Modifier) 
   var activeTab by rememberSaveable { mutableStateOf(HomeTab.Connect) }
   var chatTabStarted by rememberSaveable { mutableStateOf(false) }
   var screenTabStarted by rememberSaveable { mutableStateOf(false) }
+  var showChatSelector by rememberSaveable { mutableStateOf(false) }
 
   // Stop TTS when user navigates away from voice tab, and lazily keep the Chat/Screen tabs
   // alive after the first visit so repeated tab switches do not rebuild their UI trees.
@@ -87,6 +102,18 @@ fun PostOnboardingTabs(viewModel: MainViewModel, modifier: Modifier = Modifier) 
 
   val statusText by viewModel.statusText.collectAsState()
   val isConnected by viewModel.isConnected.collectAsState()
+  val chatSessionKey by viewModel.chatSessionKey.collectAsState()
+  val mainSessionKey by viewModel.mainSessionKey.collectAsState()
+  val chatSessions by viewModel.chatSessions.collectAsState()
+  val chatGatewayAgents by viewModel.chatGatewayAgents.collectAsState()
+  val chatTopTitle =
+    remember(activeTab, chatSessionKey, chatGatewayAgents) {
+      if (activeTab != HomeTab.Chat) {
+        "OpenClaw"
+      } else {
+        buildCompactChatTitle(chatSessionKey, chatGatewayAgents)
+      }
+    }
 
   val statusVisual =
     remember(statusText, isConnected) {
@@ -110,6 +137,9 @@ fun PostOnboardingTabs(viewModel: MainViewModel, modifier: Modifier = Modifier) 
     contentWindowInsets = WindowInsets(0, 0, 0, 0),
     topBar = {
       TopStatusBar(
+        titleText = chatTopTitle,
+        titleClickable = activeTab == HomeTab.Chat,
+        onTitleClick = { showChatSelector = true },
         statusText = formatConnectionStatusForUi(statusText),
         statusVisual = statusVisual,
       )
@@ -163,6 +193,26 @@ fun PostOnboardingTabs(viewModel: MainViewModel, modifier: Modifier = Modifier) 
         HomeTab.Settings -> SettingsSheet(viewModel = viewModel)
       }
     }
+
+    if (showChatSelector && activeTab == HomeTab.Chat) {
+      ChatSessionSelectorSheet(
+        sessionKey = chatSessionKey,
+        mainSessionKey = mainSessionKey,
+        sessions = chatSessions,
+        agents = chatGatewayAgents,
+        onDismiss = { showChatSelector = false },
+        onSelectAgentDefault = {
+          viewModel.switchChatSession(mainSessionKey.trim().ifEmpty { "main" })
+        },
+        onSelectAgent = { agentId ->
+          viewModel.switchChatSession(toAgentSessionKey(agentId))
+        },
+        onSelectSession = { key ->
+          viewModel.switchChatSession(key)
+          showChatSelector = false
+        },
+      )
+    }
   }
 }
 
@@ -185,6 +235,9 @@ private fun ScreenTabScreen(viewModel: MainViewModel, visible: Boolean, modifier
 
 @Composable
 private fun TopStatusBar(
+  titleText: String,
+  titleClickable: Boolean,
+  onTitleClick: () -> Unit,
   statusText: String,
   statusVisual: StatusVisual,
 ) {
@@ -239,11 +292,20 @@ private fun TopStatusBar(
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-      Text(
-        text = "OpenClaw",
-        style = mobileTitle2,
-        color = mobileText,
-      )
+      Surface(
+        onClick = {
+          if (titleClickable) onTitleClick()
+        },
+        color = Color.Transparent,
+      ) {
+        Text(
+          text = titleText,
+          style = mobileTitle2,
+          color = mobileText,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
       Surface(
         shape = RoundedCornerShape(999.dp),
         color = chipBg,
@@ -271,6 +333,167 @@ private fun TopStatusBar(
       }
     }
   }
+}
+
+private fun buildCompactChatTitle(sessionKey: String, agents: List<ChatGatewayAgent>): String {
+  val agentId = agentIdFromSessionKey(sessionKey)
+  val fullAgentName =
+    if (agentId.isNullOrBlank()) {
+      "默认"
+    } else {
+      val match = agents.firstOrNull { it.id.trim() == agentId.trim() }
+      match?.name?.trim()?.takeIf { it.isNotEmpty() } ?: agentId
+    }
+  val sessionName = friendlySessionName(sessionKey)
+  val shortAgent = fullAgentName.trim().ifEmpty { "默认" }.take(10)
+  val shortSession = sessionName.trim().ifEmpty { "会话" }.take(10)
+  return "$shortAgent：$shortSession"
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatSessionSelectorSheet(
+  sessionKey: String,
+  mainSessionKey: String,
+  sessions: List<ChatSessionEntry>,
+  agents: List<ChatGatewayAgent>,
+  onDismiss: () -> Unit,
+  onSelectAgentDefault: () -> Unit,
+  onSelectAgent: (String) -> Unit,
+  onSelectSession: (String) -> Unit,
+) {
+  val selectedAgentId = agentIdFromSessionKey(sessionKey)
+  val sortedAgents =
+    remember(agents) {
+      agents
+        .filter { it.id.isNotBlank() }
+        .sortedWith(compareBy({ it.name?.lowercase().orEmpty() }, { it.id.lowercase() }))
+    }
+  val allSessions =
+    remember(sessions, mainSessionKey, selectedAgentId) {
+      resolveAllSessionChoicesForAgent(
+        sessions = sessions,
+        mainSessionKey = mainSessionKey,
+        agentId = selectedAgentId,
+      )
+    }
+  val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+  ModalBottomSheet(
+    onDismissRequest = onDismiss,
+    sheetState = sheetState,
+    containerColor = mobileCardSurface,
+    contentColor = mobileText,
+    tonalElevation = 0.dp,
+  ) {
+    Column(
+      modifier =
+        Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 16.dp, vertical = 8.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        IconButton(onClick = onDismiss) {
+          Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = "返回",
+            tint = mobileText,
+          )
+        }
+        Text(text = "选择 Agent 与会话", style = mobileTitle2, color = mobileText)
+      }
+      Text(
+        text = "Agent",
+        style = mobileCaption2.copy(fontWeight = FontWeight.SemiBold),
+        color = mobileTextSecondary,
+      )
+      androidx.compose.foundation.lazy.LazyColumn(
+        modifier = Modifier.fillMaxWidth().height(160.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        item(key = "agent_default") {
+          PickerRowItem(
+            title = "默认",
+            subtitle = mainSessionKey.trim().ifEmpty { "main" },
+            active = selectedAgentId.isNullOrBlank(),
+            onClick = onSelectAgentDefault,
+          )
+        }
+        items(items = sortedAgents, key = { it.id }) { agent ->
+          val title =
+            buildString {
+              agent.emoji?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                append(it)
+                append(' ')
+              }
+              append(agent.name?.trim()?.takeIf { it.isNotEmpty() } ?: agent.id)
+            }
+          PickerRowItem(
+            title = title,
+            subtitle = "agent:${agent.id}:main",
+            active = selectedAgentId?.trim() == agent.id.trim(),
+            onClick = { onSelectAgent(agent.id) },
+          )
+        }
+      }
+      Text(
+        text = "会话",
+        style = mobileCaption2.copy(fontWeight = FontWeight.SemiBold),
+        color = mobileTextSecondary,
+      )
+      androidx.compose.foundation.lazy.LazyColumn(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        items(items = allSessions, key = { it.key }) { entry ->
+          PickerRowItem(
+            title = friendlySessionName(entry.displayName ?: entry.key),
+            subtitle = entry.key,
+            active = entry.key == sessionKey,
+            onClick = { onSelectSession(entry.key) },
+          )
+        }
+      }
+      Spacer(modifier = Modifier.height(24.dp))
+    }
+  }
+}
+
+@Composable
+private fun PickerRowItem(title: String, subtitle: String, active: Boolean, onClick: () -> Unit) {
+  Surface(
+    onClick = onClick,
+    shape = RoundedCornerShape(12.dp),
+    color = if (active) mobileAccent.copy(alpha = 0.22f) else mobileCardSurface,
+    border = BorderStroke(1.dp, if (active) LocalMobileColors.current.chipBorderConnecting else mobileBorder),
+  ) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+      Text(
+        text = title,
+        style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
+        color = mobileText,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+      Text(
+        text = subtitle,
+        style = mobileCaption2,
+        color = mobileTextSecondary,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+  }
+}
+
+private fun toAgentSessionKey(agentId: String): String {
+  val id = agentId.trim()
+  return if (id.isEmpty()) "main" else "agent:$id:main"
 }
 
 @Composable

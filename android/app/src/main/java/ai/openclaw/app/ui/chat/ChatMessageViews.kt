@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -50,7 +51,9 @@ import ai.openclaw.app.ui.mobileText
 import ai.openclaw.app.ui.mobileTextSecondary
 import ai.openclaw.app.ui.mobileWarning
 import ai.openclaw.app.ui.mobileWarningSoft
+import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.Date
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -66,7 +69,7 @@ private const val assistantTextPreviewChars = 420
 private const val assistantMetaPreviewChars = 240
 
 @Composable
-fun ChatMessageBubble(message: ChatMessage) {
+fun ChatMessageBubble(message: ChatMessage, assistantLabel: String) {
   val role = message.role.trim().lowercase(Locale.US)
   val style = bubbleStyle(role)
 
@@ -78,7 +81,7 @@ fun ChatMessageBubble(message: ChatMessage) {
 
   if (displayableContent.isEmpty()) return
 
-  ChatBubbleContainer(style = style, roleLabel = roleLabel(role)) {
+  ChatBubbleContainer(style = style, roleLabel = roleLabel(role, assistantLabel), timestampMs = message.timestampMs) {
     ChatMessageBody(content = displayableContent, textColor = mobileText, role = role, messageId = message.id)
   }
 }
@@ -87,6 +90,7 @@ fun ChatMessageBubble(message: ChatMessage) {
 private fun ChatBubbleContainer(
   style: ChatBubbleStyle,
   roleLabel: String,
+  timestampMs: Long?,
   modifier: Modifier = Modifier,
   content: @Composable () -> Unit,
 ) {
@@ -106,11 +110,27 @@ private fun ChatBubbleContainer(
         modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
       ) {
-        Text(
-          text = roleLabel,
-          style = mobileCaption2.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp),
-          color = style.roleColor,
-        )
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+          Text(
+            text = roleLabel,
+            style = mobileCaption2.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp),
+            color = style.roleColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+          )
+          timestampMs?.let {
+            Text(
+              text = formatMessageTime(it),
+              style = mobileCaption2,
+              color = mobileTextSecondary,
+            )
+          }
+        }
         content()
       }
     }
@@ -160,12 +180,15 @@ private fun UserTextWithDebugToggle(rawText: String, textColor: Color, stateKey:
   val sanitized = extractUserVisibleInput(rawText)
   val displayText = if (showRaw) rawText else sanitized
 
-  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+  Box(modifier = Modifier.fillMaxWidth()) {
     ChatMarkdown(text = displayText, textColor = textColor)
     if (sanitized != rawText) {
-      TextButton(onClick = { showRaw = !showRaw }) {
+      TextButton(
+        onClick = { showRaw = !showRaw },
+        modifier = Modifier.align(Alignment.TopEnd),
+      ) {
         Text(
-          text = if (showRaw) "显示净化文本" else "显示原文（调试）",
+          text = if (showRaw) "显示净化文本" else "调试展开",
           style = mobileCaption1,
           color = mobileTextSecondary,
         )
@@ -409,10 +432,11 @@ private fun extractUserVisibleInput(raw: String): String {
 }
 
 @Composable
-fun ChatTypingIndicatorBubble() {
+fun ChatTypingIndicatorBubble(assistantLabel: String) {
   ChatBubbleContainer(
     style = bubbleStyle("assistant"),
-    roleLabel = roleLabel("assistant"),
+    roleLabel = roleLabel("assistant", assistantLabel),
+    timestampMs = null,
   ) {
     Row(
       verticalAlignment = Alignment.CenterVertically,
@@ -425,7 +449,7 @@ fun ChatTypingIndicatorBubble() {
 }
 
 @Composable
-fun ChatPendingToolsBubble(toolCalls: List<ChatPendingToolCall>) {
+fun ChatPendingToolsBubble(toolCalls: List<ChatPendingToolCall>, assistantLabel: String) {
   val context = LocalContext.current
   val displays =
     remember(toolCalls, context) {
@@ -434,7 +458,8 @@ fun ChatPendingToolsBubble(toolCalls: List<ChatPendingToolCall>) {
 
   ChatBubbleContainer(
     style = bubbleStyle("assistant"),
-    roleLabel = "工具",
+    roleLabel = "$assistantLabel · 工具",
+    timestampMs = null,
   ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
       Text("正在运行工具…", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
@@ -468,10 +493,11 @@ fun ChatPendingToolsBubble(toolCalls: List<ChatPendingToolCall>) {
 }
 
 @Composable
-fun ChatStreamingAssistantBubble(text: String) {
+fun ChatStreamingAssistantBubble(text: String, assistantLabel: String) {
   ChatBubbleContainer(
     style = bubbleStyle("assistant").copy(borderColor = mobileAccent),
-    roleLabel = "OpenClaw · 实时",
+    roleLabel = "$assistantLabel · 实时",
+    timestampMs = null,
   ) {
     ChatMarkdown(text = text, textColor = mobileText)
   }
@@ -506,12 +532,17 @@ private fun bubbleStyle(role: String): ChatBubbleStyle {
   }
 }
 
-private fun roleLabel(role: String): String {
+private fun roleLabel(role: String, assistantLabel: String): String {
   return when (role) {
     "user" -> "你"
     "system" -> "系统"
-    else -> "OpenClaw"
+    else -> assistantLabel
   }
+}
+
+private fun formatMessageTime(timestampMs: Long): String {
+  val formatter = SimpleDateFormat("HH:mm", Locale.getDefault())
+  return formatter.format(Date(timestampMs))
 }
 
 @Composable
