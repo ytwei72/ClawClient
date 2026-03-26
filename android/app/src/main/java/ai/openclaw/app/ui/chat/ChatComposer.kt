@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -41,7 +42,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -87,17 +91,23 @@ fun ChatComposer(
       value = input,
       onValueChange = { input = it },
       modifier = Modifier.fillMaxWidth(),
-      placeholder = { Text("Type a message…", style = mobileBodyStyle(), color = mobileTextTertiary) },
+      placeholder = { Text("输入消息…", style = mobileBodyStyle(), color = mobileTextTertiary) },
       minLines = 2,
       maxLines = 5,
-      textStyle = mobileBodyStyle().copy(color = mobileText),
+      // Manrope (mobileFontFamily) is Latin-focused; use system sans-serif so IME can compose CJK with proper fallback.
+      textStyle = mobileBodyStyle().copy(color = mobileText, fontFamily = FontFamily.SansSerif),
+      keyboardOptions =
+        KeyboardOptions(
+          keyboardType = KeyboardType.Text,
+          imeAction = ImeAction.Default,
+        ),
       shape = RoundedCornerShape(14.dp),
       colors = chatTextFieldColors(),
     )
 
     if (!healthOk) {
       Text(
-        text = "Gateway is offline. Connect first in the Connect tab.",
+        text = "Gateway 未连接。请先在「连接」页完成连接。",
         style = mobileCallout,
         color = ai.openclaw.app.ui.mobileWarning,
       )
@@ -124,7 +134,7 @@ fun ChatComposer(
               style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
               color = mobileTextSecondary,
             )
-            Icon(Icons.Default.ArrowDropDown, contentDescription = "Select thinking level", modifier = Modifier.size(18.dp), tint = mobileTextTertiary)
+            Icon(Icons.Default.ArrowDropDown, contentDescription = "选择思考深度", modifier = Modifier.size(18.dp), tint = mobileTextTertiary)
           }
         }
 
@@ -145,7 +155,7 @@ fun ChatComposer(
       }
 
       SecondaryActionButton(
-        label = "Attach",
+        label = "附件",
         icon = Icons.Default.AttachFile,
         enabled = true,
         compact = true,
@@ -153,7 +163,7 @@ fun ChatComposer(
       )
 
       SecondaryActionButton(
-        label = "Refresh",
+        label = "刷新",
         icon = Icons.Default.Refresh,
         enabled = true,
         compact = true,
@@ -161,7 +171,7 @@ fun ChatComposer(
       )
 
       SecondaryActionButton(
-        label = "Abort",
+        label = "中止",
         icon = Icons.Default.Stop,
         enabled = pendingRunCount > 0,
         compact = true,
@@ -196,7 +206,7 @@ fun ChatComposer(
         }
         Spacer(modifier = Modifier.width(6.dp))
         Text(
-          text = "Send",
+          text = "发送",
           style = mobileHeadline.copy(fontWeight = FontWeight.Bold),
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
@@ -266,10 +276,10 @@ private fun ThinkingMenuItem(
 
 private fun thinkingLabel(raw: String): String {
   return when (raw.trim().lowercase()) {
-    "low" -> "Low"
-    "medium" -> "Medium"
-    "high" -> "High"
-    else -> "Off"
+    "low" -> "低"
+    "medium" -> "中"
+    "high" -> "高"
+    else -> "关"
   }
 }
 

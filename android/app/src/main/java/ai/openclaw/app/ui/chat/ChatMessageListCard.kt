@@ -101,13 +101,13 @@ private fun EmptyChatHint(modifier: Modifier = Modifier, healthOk: Boolean) {
       modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
       verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-      Text("No messages yet", style = mobileHeadline, color = mobileText)
+      Text("暂无消息", style = mobileHeadline, color = mobileText)
       Text(
         text =
           if (healthOk) {
-            "Send the first prompt to start this session."
+            "发送第一条消息以开始本会话。"
           } else {
-            "Connect gateway first, then return to chat."
+            "请先连接 Gateway，再返回聊天。"
           },
         style = mobileCallout,
         color = mobileTextSecondary,

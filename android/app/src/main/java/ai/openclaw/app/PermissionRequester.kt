@@ -128,8 +128,8 @@ class PermissionRequester(private val activity: ComponentActivity) {
           AlertDialog.Builder(activity)
             .setTitle("Permission required")
             .setMessage(buildRationaleMessage(permissions))
-            .setPositiveButton("Continue") { _, _ -> finish(true) }
-            .setNegativeButton("Not now") { _, _ -> finish(false) }
+            .setPositiveButton("继续") { _, _ -> finish(true) }
+            .setNegativeButton("暂不") { _, _ -> finish(false) }
             .setOnCancelListener { finish(false) }
             .show()
       }
@@ -155,9 +155,9 @@ class PermissionRequester(private val activity: ComponentActivity) {
       lifecycle.addObserver(actualObserver)
       dialog =
         AlertDialog.Builder(activity)
-          .setTitle("Enable permission in Settings")
+          .setTitle("请在系统设置中开启权限")
           .setMessage(buildSettingsMessage(permissions))
-          .setPositiveButton("Open Settings") { _, _ ->
+          .setPositiveButton("打开设置") { _, _ ->
             if (activity.isFinishing || activity.isDestroyed) return@setPositiveButton
             val intent =
               Intent(
@@ -166,26 +166,26 @@ class PermissionRequester(private val activity: ComponentActivity) {
               )
             activity.startActivity(intent)
           }
-          .setNegativeButton("Cancel", null)
+          .setNegativeButton("取消", null)
           .setOnDismissListener { removeObserver() }
           .show()
     }
 
   private fun buildRationaleMessage(permissions: List<String>): String {
     val labels = permissions.map { permissionLabel(it) }
-    return "OpenClaw needs ${labels.joinToString(", ")} permissions to continue."
+    return "OpenClaw 需要以下权限才能继续：${labels.joinToString("、")}。"
   }
 
   private fun buildSettingsMessage(permissions: List<String>): String {
     val labels = permissions.map { permissionLabel(it) }
-    return "Please enable ${labels.joinToString(", ")} in Android Settings to continue."
+    return "请在 Android 系统设置中开启：${labels.joinToString("、")}。"
   }
 
   private fun permissionLabel(permission: String): String =
     when (permission) {
-      Manifest.permission.CAMERA -> "Camera"
-      Manifest.permission.RECORD_AUDIO -> "Microphone"
-      Manifest.permission.SEND_SMS -> "SMS"
+      Manifest.permission.CAMERA -> "相机"
+      Manifest.permission.RECORD_AUDIO -> "麦克风"
+      Manifest.permission.SEND_SMS -> "短信"
       else -> permission
     }
 }

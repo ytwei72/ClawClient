@@ -468,7 +468,7 @@ class NodeRuntime(
     scope.launch {
       if (!_nodeConnected.value) {
         _canvasRehydratePending.value = false
-        _canvasRehydrateErrorText.value = "Node offline. Reconnect and retry."
+        _canvasRehydrateErrorText.value = "节点离线，请重新连接后重试。"
         return@launch
       }
       if (!force && didAutoRequestCanvasRehydrate) return@launch
@@ -479,9 +479,9 @@ class NodeRuntime(
 
       val sessionKey = resolveMainSessionKey()
       val prompt =
-        "Restore canvas now for session=$sessionKey source=$source. " +
-          "If existing A2UI state exists, replay it immediately. " +
-          "If not, create and render a compact mobile-friendly dashboard in Canvas."
+        "请立即为会话 $sessionKey（来源：$source）恢复 Canvas。" +
+          "若已有 A2UI 状态请立刻重放；" +
+          "否则请创建并渲染一个适合手机的简洁仪表盘。"
       val sent =
         nodeSession.sendNodeEvent(
           event = "agent.request",
@@ -499,7 +499,7 @@ class NodeRuntime(
         }
         if (canvasRehydrateSeq.get() == requestId) {
           _canvasRehydratePending.value = false
-          _canvasRehydrateErrorText.value = "Failed to request restore. Tap to retry."
+          _canvasRehydrateErrorText.value = "恢复请求失败，点击重试。"
         }
         Log.w("OpenClawCanvas", "canvas rehydrate request failed ($source): transport unavailable")
         return@launch
@@ -510,7 +510,7 @@ class NodeRuntime(
         if (!_canvasRehydratePending.value) return@launch
         if (_canvasA2uiHydrated.value) return@launch
         _canvasRehydratePending.value = false
-        _canvasRehydrateErrorText.value = "No canvas update yet. Tap to retry."
+        _canvasRehydrateErrorText.value = "尚无 Canvas 更新，点击重试。"
       }
     }
   }
@@ -1016,7 +1016,7 @@ class NodeRuntime(
     val state = resolveHomeCanvasGatewayState()
     val gatewayName = normalized(_serverName.value)
     val gatewayAddress = normalized(_remoteAddress.value)
-    val gatewayLabel = gatewayName ?: gatewayAddress ?: "Gateway"
+    val gatewayLabel = gatewayName ?: gatewayAddress ?: "网关"
     val activeAgentId = resolveActiveAgentId()
     val agents = homeCanvasAgents(activeAgentId)
 
@@ -1024,47 +1024,47 @@ class NodeRuntime(
       HomeCanvasGatewayState.Connected ->
         HomeCanvasPayload(
           gatewayState = "connected",
-          eyebrow = "Connected to $gatewayLabel",
-          title = "Your agents are ready",
+          eyebrow = "已连接 $gatewayLabel",
+          title = "智能体已就绪",
           subtitle =
-            "This phone stays dormant until the gateway needs it, then wakes, syncs, and goes back to sleep.",
+            "本机平时保持休眠，仅在 Gateway 需要时唤醒、同步后再次休眠。",
           gatewayLabel = gatewayLabel,
           activeAgentName = resolveActiveAgentName(activeAgentId),
           activeAgentBadge = agents.firstOrNull { it.isActive }?.badge ?: "OC",
-          activeAgentCaption = "Selected on this phone",
+          activeAgentCaption = "本机当前选择",
           agentCount = agents.size,
           agents = agents.take(6),
-          footer = "The overview refreshes on reconnect and when this screen opens.",
+          footer = "重新连接或打开本页时会刷新概览。",
         )
       HomeCanvasGatewayState.Connecting ->
         HomeCanvasPayload(
           gatewayState = "connecting",
-          eyebrow = "Reconnecting",
-          title = "OpenClaw is syncing back up",
+          eyebrow = "正在重新连接",
+          title = "OpenClaw 正在恢复同步",
           subtitle =
-            "The gateway session is coming back online. Agent shortcuts should settle automatically in a moment.",
+            "Gateway 会话正在恢复，智能体入口稍后会自动就绪。",
           gatewayLabel = gatewayLabel,
           activeAgentName = resolveActiveAgentName(activeAgentId),
           activeAgentBadge = "OC",
-          activeAgentCaption = "Gateway session in progress",
+          activeAgentCaption = "Gateway 会话进行中",
           agentCount = agents.size,
           agents = agents.take(4),
-          footer = "If the gateway is reachable, reconnect should complete without intervention.",
+          footer = "若 Gateway 可达，重连通常无需额外操作。",
         )
       HomeCanvasGatewayState.Error, HomeCanvasGatewayState.Offline ->
         HomeCanvasPayload(
           gatewayState = if (state == HomeCanvasGatewayState.Error) "error" else "offline",
-          eyebrow = "Welcome to OpenClaw",
-          title = "Your phone stays quiet until it is needed",
+          eyebrow = "欢迎使用 OpenClaw",
+          title = "需要时才会唤醒本机",
           subtitle =
-            "Pair this device to your gateway to wake it only for real work, keep a live agent overview handy, and avoid battery-draining background loops.",
+            "将本设备与 Gateway 配对后，仅在真正需要工作时唤醒，随时查看智能体概览，并减少耗电的后台常驻。",
           gatewayLabel = gatewayLabel,
-          activeAgentName = "Main",
+          activeAgentName = "主会话",
           activeAgentBadge = "OC",
-          activeAgentCaption = "Connect to load your agents",
+          activeAgentCaption = "连接后即可加载智能体",
           agentCount = agents.size,
           agents = agents.take(4),
-          footer = "When connected, the gateway can wake the phone with a silent push instead of holding an always-on session.",
+          footer = "连接后，Gateway 可通过静默推送唤醒手机，而无需长期保持会话。",
         )
     }
   }
@@ -1095,7 +1095,7 @@ class NodeRuntime(
       }
       return activeAgentId
     }
-    return gatewayAgents.firstOrNull()?.let { normalized(it.name) ?: it.id } ?: "Main"
+    return gatewayAgents.firstOrNull()?.let { normalized(it.name) ?: it.id } ?: "主会话"
   }
 
   private fun homeCanvasAgents(activeAgentId: String): List<HomeCanvasAgentCard> {

@@ -68,7 +68,7 @@ class TalkModeManager(
   private val _isSpeaking = MutableStateFlow(false)
   val isSpeaking: StateFlow<Boolean> = _isSpeaking
 
-  private val _statusText = MutableStateFlow("Off")
+  private val _statusText = MutableStateFlow("关")
   val statusText: StateFlow<String> = _statusText
 
   private val _lastAssistantText = MutableStateFlow<String?>(null)
@@ -165,10 +165,10 @@ class TalkModeManager(
           ?: waitForAssistantText(session, startedAt, if (ok) 12_000 else 25_000)
         if (!assistant.isNullOrBlank()) {
           val playbackToken = playbackGeneration.incrementAndGet()
-          _statusText.value = "Speaking…"
+          _statusText.value = "说话中…"
           playAssistant(assistant, playbackToken)
         } else {
-          _statusText.value = "No reply"
+          _statusText.value = "无回复"
         }
       } catch (err: Throwable) {
         Log.w(tag, "speakWakeCommand failed: ${err.message}")
@@ -187,7 +187,7 @@ class TalkModeManager(
       reloadConfig()
       ensurePlaybackActive(playbackToken)
       _isSpeaking.value = true
-      _statusText.value = "Speaking…"
+      _statusText.value = "说话中…"
       playAssistant(text, playbackToken)
       ttsJob = null
     }
@@ -286,7 +286,7 @@ class TalkModeManager(
       Log.d(tag, "start")
 
       if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-        _statusText.value = "Speech recognizer unavailable"
+        _statusText.value = "语音识别不可用"
         Log.w(tag, "speech recognizer unavailable")
         return@post
       }
@@ -295,7 +295,7 @@ class TalkModeManager(
         ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
           PackageManager.PERMISSION_GRANTED
       if (!micOk) {
-        _statusText.value = "Microphone permission required"
+        _statusText.value = "需要麦克风权限"
         Log.w(tag, "microphone permission required")
         return@post
       }
@@ -307,7 +307,7 @@ class TalkModeManager(
         startSilenceMonitor()
         Log.d(tag, "listening")
       } catch (err: Throwable) {
-        _statusText.value = "Start failed: ${err.message ?: err::class.simpleName}"
+        _statusText.value = "启动失败：${err.message ?: err::class.simpleName}"
         Log.w(tag, "start failed: ${err.message ?: err::class.simpleName}")
       }
     }
@@ -324,7 +324,7 @@ class TalkModeManager(
     lastTranscript = ""
     lastHeardAtMs = null
     _isListening.value = false
-    _statusText.value = "Off"
+    _statusText.value = "关"
     stopSpeaking()
     chatSubscribedSessionKey = null
     pendingRunId = null
@@ -357,7 +357,7 @@ class TalkModeManager(
       }
 
     if (markListening) {
-      _statusText.value = "Listening"
+      _statusText.value = "聆听中"
       _isListening.value = true
     }
     r.startListening(intent)
@@ -440,7 +440,7 @@ class TalkModeManager(
   private suspend fun finalizeTranscript(transcript: String) {
     listeningMode = false
     _isListening.value = false
-    _statusText.value = "Thinking…"
+    _statusText.value = "思考中…"
     lastTranscript = ""
     lastHeardAtMs = null
     // Release SpeechRecognizer before making the API call and playing TTS.
@@ -457,7 +457,7 @@ class TalkModeManager(
     ensureConfigLoaded()
     val prompt = buildPrompt(transcript)
     if (!isConnected()) {
-      _statusText.value = "Gateway not connected"
+      _statusText.value = "Gateway 未连接"
       Log.w(tag, "finalize: gateway not connected")
       start()
       return
@@ -477,7 +477,7 @@ class TalkModeManager(
       val assistant = consumeRunText(runId)
         ?: waitForAssistantText(session, startedAt, if (ok) 12_000 else 25_000)
       if (assistant.isNullOrBlank()) {
-        _statusText.value = "No reply"
+        _statusText.value = "无回复"
         Log.w(tag, "assistant text timeout runId=$runId")
         start()
         return
@@ -492,7 +492,7 @@ class TalkModeManager(
         Log.d(tag, "finalize speech cancelled")
         return
       }
-      _statusText.value = "Talk failed: ${err.message ?: err::class.simpleName}"
+      _statusText.value = "对话失败：${err.message ?: err::class.simpleName}"
       Log.w(tag, "finalize failed: ${err.message ?: err::class.simpleName}")
     }
 
@@ -517,11 +517,11 @@ class TalkModeManager(
 
   private fun buildPrompt(transcript: String): String {
     val lines = mutableListOf(
-      "Talk Mode active. Reply in a concise, spoken tone.",
-      "You may optionally prefix the response with JSON (first line) to set ElevenLabs voice (id or alias), e.g. {\"voice\":\"<id>\",\"once\":true}.",
+      "语音模式已开启。请用适合朗读的简洁口语回复。",
+      "可选：在首行用 JSON 指定 ElevenLabs 音色（id 或别名），例如 {\"voice\":\"<id>\",\"once\":true}。",
     )
     lastInterruptedAtSeconds?.let {
-      lines.add("Assistant speech interrupted at ${"%.1f".format(it)}s.")
+      lines.add("助手语音在 ${"%.1f".format(it)} 秒处被打断。")
       lastInterruptedAtSeconds = null
     }
     lines.add("")
@@ -662,7 +662,7 @@ class TalkModeManager(
     }
     ensurePlaybackActive(playbackToken)
 
-    _statusText.value = "Speaking…"
+    _statusText.value = "说话中…"
     _isSpeaking.value = true
     lastSpokenText = cleaned
     ensureInterruptListener()
@@ -678,7 +678,7 @@ class TalkModeManager(
         Log.d(tag, "assistant speech cancelled")
         return
       }
-      _statusText.value = "Speak failed: ${err.message ?: err::class.simpleName}"
+      _statusText.value = "播放失败：${err.message ?: err::class.simpleName}"
       Log.w(tag, "talk.speak failed: ${err.message ?: err::class.simpleName}")
     } finally {
 
@@ -814,7 +814,7 @@ class TalkModeManager(
   fun stopTts() {
     stopSpeaking(resetInterrupt = true)
     _isSpeaking.value = false
-    _statusText.value = "Listening"
+    _statusText.value = "聆听中"
   }
 
   private fun stopSpeaking(resetInterrupt: Boolean = true) {
@@ -1012,7 +1012,7 @@ class TalkModeManager(
     object : RecognitionListener {
       override fun onReadyForSpeech(params: Bundle?) {
         if (_isEnabled.value) {
-          _statusText.value = if (_isListening.value) "Listening" else _statusText.value
+          _statusText.value = if (_isListening.value) "聆听中" else _statusText.value
         }
       }
 
@@ -1035,21 +1035,21 @@ class TalkModeManager(
         if (stopRequested) return
         _isListening.value = false
         if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
-          _statusText.value = "Microphone permission required"
+          _statusText.value = "需要麦克风权限"
           return
         }
 
         _statusText.value =
           when (error) {
-            SpeechRecognizer.ERROR_AUDIO -> "Audio error"
-            SpeechRecognizer.ERROR_CLIENT -> "Client error"
-            SpeechRecognizer.ERROR_NETWORK -> "Network error"
-            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
-            SpeechRecognizer.ERROR_NO_MATCH -> "Listening"
-            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recognizer busy"
-            SpeechRecognizer.ERROR_SERVER -> "Server error"
-            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Listening"
-            else -> "Speech error ($error)"
+            SpeechRecognizer.ERROR_AUDIO -> "音频错误"
+            SpeechRecognizer.ERROR_CLIENT -> "客户端错误"
+            SpeechRecognizer.ERROR_NETWORK -> "网络错误"
+            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "网络超时"
+            SpeechRecognizer.ERROR_NO_MATCH -> "聆听中"
+            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "识别器繁忙"
+            SpeechRecognizer.ERROR_SERVER -> "服务错误"
+            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "聆听中"
+            else -> "语音错误 ($error)"
           }
         scheduleRestart(delayMs = 600)
       }

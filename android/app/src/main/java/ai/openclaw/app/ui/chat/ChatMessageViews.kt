@@ -138,7 +138,7 @@ fun ChatTypingIndicatorBubble() {
       horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
       DotPulse(color = mobileTextSecondary)
-      Text("Thinking...", style = mobileCallout, color = mobileTextSecondary)
+      Text("思考中…", style = mobileCallout, color = mobileTextSecondary)
     }
   }
 }
@@ -153,10 +153,10 @@ fun ChatPendingToolsBubble(toolCalls: List<ChatPendingToolCall>) {
 
   ChatBubbleContainer(
     style = bubbleStyle("assistant"),
-    roleLabel = "Tools",
+    roleLabel = "工具",
   ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-      Text("Running tools...", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+      Text("正在运行工具…", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
       for (display in displays.take(6)) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
           Text(
@@ -190,7 +190,7 @@ fun ChatPendingToolsBubble(toolCalls: List<ChatPendingToolCall>) {
 fun ChatStreamingAssistantBubble(text: String) {
   ChatBubbleContainer(
     style = bubbleStyle("assistant").copy(borderColor = mobileAccent),
-    roleLabel = "OpenClaw · Live",
+    roleLabel = "OpenClaw · 实时",
   ) {
     ChatMarkdown(text = text, textColor = mobileText)
   }
@@ -227,8 +227,8 @@ private fun bubbleStyle(role: String): ChatBubbleStyle {
 
 private fun roleLabel(role: String): String {
   return when (role) {
-    "user" -> "You"
-    "system" -> "System"
+    "user" -> "你"
+    "system" -> "系统"
     else -> "OpenClaw"
   }
 }
@@ -247,13 +247,13 @@ private fun ChatBase64Image(base64: String, mimeType: String?) {
     ) {
       Image(
         bitmap = image!!,
-        contentDescription = mimeType ?: "attachment",
+        contentDescription = mimeType ?: "附件",
         contentScale = ContentScale.Fit,
         modifier = Modifier.fillMaxWidth(),
       )
     }
   } else if (imageState.failed) {
-    Text("Unsupported attachment", style = mobileCaption1, color = mobileTextSecondary)
+    Text("无法显示的附件", style = mobileCaption1, color = mobileTextSecondary)
   }
 }
 

@@ -119,12 +119,12 @@ class ChatController(
     val trimmed = message.trim()
     if (trimmed.isEmpty() && attachments.isEmpty()) return
     if (!_healthOk.value) {
-      _errorText.value = "Gateway health not OK; cannot send"
+      _errorText.value = "Gateway 状态异常，无法发送"
       return
     }
 
     val runId = UUID.randomUUID().toString()
-    val text = if (trimmed.isEmpty() && attachments.isNotEmpty()) "See attached." else trimmed
+    val text = if (trimmed.isEmpty() && attachments.isNotEmpty()) "请查看附件。" else trimmed
     val sessionKey = _sessionKey.value
     val thinking = normalizeThinking(thinkingLevel)
 
@@ -237,7 +237,7 @@ class ChatController(
         _healthOk.value = true
       }
       "seqGap" -> {
-        _errorText.value = "Event stream interrupted; try refreshing."
+        _errorText.value = "事件流中断，请尝试刷新。"
         clearPendingRuns()
       }
       "chat" -> {
@@ -330,7 +330,7 @@ class ChatController(
       }
       "final", "aborted", "error" -> {
         if (state == "error") {
-          _errorText.value = payload["errorMessage"].asStringOrNull() ?: "Chat failed"
+          _errorText.value = payload["errorMessage"].asStringOrNull() ?: "聊天失败"
         }
         if (runId != null) clearPendingRun(runId) else clearPendingRuns()
         pendingToolCallsById.clear()
@@ -391,7 +391,7 @@ class ChatController(
         }
       }
       "error" -> {
-        _errorText.value = "Event stream interrupted; try refreshing."
+        _errorText.value = "事件流中断，请尝试刷新。"
         clearPendingRuns()
         pendingToolCallsById.clear()
         publishPendingToolCalls()
@@ -431,7 +431,7 @@ class ChatController(
           }
         if (!stillPending) return@launch
         clearPendingRun(runId)
-        _errorText.value = "Timed out waiting for a reply; try again or refresh."
+        _errorText.value = "等待回复超时，请重试或刷新。"
       }
   }
 

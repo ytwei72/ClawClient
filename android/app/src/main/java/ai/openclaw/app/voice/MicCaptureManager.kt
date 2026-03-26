@@ -68,7 +68,7 @@ class MicCaptureManager(
   private val _isListening = MutableStateFlow(false)
   val isListening: StateFlow<Boolean> = _isListening
 
-  private val _statusText = MutableStateFlow("Mic off")
+  private val _statusText = MutableStateFlow("麦克风关")
   val statusText: StateFlow<String> = _statusText
 
   private val _liveTranscript = MutableStateFlow<String?>(null)
@@ -169,12 +169,12 @@ class MicCaptureManager(
         completePendingTurn()
       }
       "error" -> {
-        val errorMessage = payload["errorMessage"].asStringOrNull()?.trim().orEmpty().ifEmpty { "Voice request failed" }
+        val errorMessage = payload["errorMessage"].asStringOrNull()?.trim().orEmpty().ifEmpty { "语音请求失败" }
         upsertPendingAssistant(text = errorMessage, isStreaming = false)
         completePendingTurn()
       }
       "aborted" -> {
-        upsertPendingAssistant(text = "Response aborted", isStreaming = false)
+        upsertPendingAssistant(text = "回复已中止", isStreaming = false)
         completePendingTurn()
       }
     }
@@ -183,12 +183,12 @@ class MicCaptureManager(
   private fun start() {
     stopRequested = false
     if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-      _statusText.value = "Speech recognizer unavailable"
+      _statusText.value = "语音识别不可用"
       _micEnabled.value = false
       return
     }
     if (!hasMicPermission()) {
-      _statusText.value = "Microphone permission required"
+      _statusText.value = "需要麦克风权限"
       _micEnabled.value = false
       return
     }
@@ -200,7 +200,7 @@ class MicCaptureManager(
         }
         startListeningSession()
       } catch (err: Throwable) {
-        _statusText.value = "Start failed: ${err.message ?: err::class.simpleName}"
+        _statusText.value = "启动失败：${err.message ?: err::class.simpleName}"
         _micEnabled.value = false
       }
     }
@@ -211,7 +211,7 @@ class MicCaptureManager(
     restartJob?.cancel()
     restartJob = null
     _isListening.value = false
-    _statusText.value = if (_isSending.value) "Mic off · sending…" else "Mic off"
+    _statusText.value = if (_isSending.value) "麦克风关 · 发送中…" else "麦克风关"
     _inputLevel.value = 0f
     mainHandler.post {
       recognizer?.cancel()
@@ -237,9 +237,9 @@ class MicCaptureManager(
       }
     _statusText.value =
       when {
-        _isSending.value -> "Listening · sending queued voice"
-        messageQueue.isNotEmpty() -> "Listening · ${messageQueue.size} queued"
-        else -> "Listening"
+        _isSending.value -> "聆听中 · 正在发送排队语音"
+        messageQueue.isNotEmpty() -> "聆听中 · ${messageQueue.size} 条排队"
+        else -> "聆听中"
       }
     _isListening.value = true
     recognizerInstance.startListening(intent)
@@ -290,9 +290,9 @@ class MicCaptureManager(
     if (_isSending.value) return
     if (messageQueue.isEmpty()) {
       if (_micEnabled.value) {
-        _statusText.value = "Listening"
+        _statusText.value = "聆听中"
       } else {
-        _statusText.value = "Mic off"
+        _statusText.value = "麦克风关"
       }
       return
     }
@@ -305,7 +305,7 @@ class MicCaptureManager(
     _isSending.value = true
     pendingRunTimeoutJob?.cancel()
     pendingRunTimeoutJob = null
-    _statusText.value = if (_micEnabled.value) "Listening · sending queued voice" else "Sending queued voice"
+    _statusText.value = if (_micEnabled.value) "聆听中 · 正在发送排队语音" else "正在发送排队语音"
 
     scope.launch {
       try {
@@ -337,7 +337,7 @@ class MicCaptureManager(
           if (!gatewayConnected) {
             queuedWaitingStatus()
           } else {
-            "Send failed: ${err.message ?: err::class.simpleName}"
+            "发送失败：${err.message ?: err::class.simpleName}"
           }
       }
     }
@@ -354,7 +354,7 @@ class MicCaptureManager(
         _isSending.value = false
         _statusText.value =
           if (gatewayConnected) {
-            "Voice reply timed out; retrying queued turn"
+            "语音回复超时，将重试排队轮次"
           } else {
             queuedWaitingStatus()
           }
@@ -376,7 +376,7 @@ class MicCaptureManager(
   }
 
   private fun queuedWaitingStatus(): String {
-    return "${messageQueue.size} queued · waiting for gateway"
+    return "${messageQueue.size} 条排队 · 等待 Gateway"
   }
 
   private fun appendConversation(
@@ -508,20 +508,20 @@ class MicCaptureManager(
         _inputLevel.value = 0f
         val status =
           when (error) {
-            SpeechRecognizer.ERROR_AUDIO -> "Audio error"
-            SpeechRecognizer.ERROR_CLIENT -> "Client error"
-            SpeechRecognizer.ERROR_NETWORK -> "Network error"
-            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
-            SpeechRecognizer.ERROR_NO_MATCH -> "Listening"
-            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recognizer busy"
-            SpeechRecognizer.ERROR_SERVER -> "Server error"
-            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Listening"
-            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission required"
-            SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "Language not supported on this device"
-            SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "Language unavailable on this device"
-            SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> "Speech service disconnected"
-            SpeechRecognizer.ERROR_TOO_MANY_REQUESTS -> "Speech requests limited; retrying"
-            else -> "Speech error ($error)"
+            SpeechRecognizer.ERROR_AUDIO -> "音频错误"
+            SpeechRecognizer.ERROR_CLIENT -> "客户端错误"
+            SpeechRecognizer.ERROR_NETWORK -> "网络错误"
+            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "网络超时"
+            SpeechRecognizer.ERROR_NO_MATCH -> "聆听中"
+            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "识别器繁忙"
+            SpeechRecognizer.ERROR_SERVER -> "服务错误"
+            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "聆听中"
+            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "需要麦克风权限"
+            SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "本设备不支持该语言"
+            SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "本设备该语言不可用"
+            SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> "语音服务已断开"
+            SpeechRecognizer.ERROR_TOO_MANY_REQUESTS -> "语音请求过于频繁，正在重试"
+            else -> "语音错误 ($error)"
           }
         _statusText.value = status
 

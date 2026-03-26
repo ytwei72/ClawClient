@@ -60,7 +60,7 @@ class GatewayDiscovery(
   private val _gateways = MutableStateFlow<List<GatewayEndpoint>>(emptyList())
   val gateways: StateFlow<List<GatewayEndpoint>> = _gateways.asStateFlow()
 
-  private val _statusText = MutableStateFlow("Searching…")
+  private val _statusText = MutableStateFlow("正在搜索…")
   val statusText: StateFlow<String> = _statusText.asStateFlow()
 
   private var unicastJob: Job? = null
@@ -179,16 +179,16 @@ class GatewayDiscovery(
 
     val wide =
       when (wideRcode) {
-        null -> "Wide: ?"
-        Rcode.NOERROR -> "Wide: $wideCount"
-        Rcode.NXDOMAIN -> "Wide: NXDOMAIN"
-        else -> "Wide: ${Rcode.string(wideRcode)}"
+        null -> "广域：?"
+        Rcode.NOERROR -> "广域：$wideCount"
+        Rcode.NXDOMAIN -> "广域：NXDOMAIN"
+        else -> "广域：${Rcode.string(wideRcode)}"
       }
 
     return when {
-      localCount == 0 && wideRcode == null -> "Searching for gateways…"
+      localCount == 0 && wideRcode == null -> "正在搜索 Gateway…"
       localCount == 0 -> "$wide"
-      else -> "Local: $localCount • $wide"
+      else -> "局域网：$localCount · $wide"
     }
   }
 

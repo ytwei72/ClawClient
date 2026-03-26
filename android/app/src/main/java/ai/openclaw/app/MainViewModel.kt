@@ -55,7 +55,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val canvasRehydrateErrorText: StateFlow<String?> = runtimeState(initial = null) { it.canvasRehydrateErrorText }
 
   val gateways: StateFlow<List<GatewayEndpoint>> = runtimeState(initial = emptyList()) { it.gateways }
-  val discoveryStatusText: StateFlow<String> = runtimeState(initial = "Searching…") { it.discoveryStatusText }
+  val discoveryStatusText: StateFlow<String> = runtimeState(initial = "正在搜索…") { it.discoveryStatusText }
 
   val isConnected: StateFlow<Boolean> = runtimeState(initial = false) { it.isConnected }
   val isNodeConnected: StateFlow<Boolean> = runtimeState(initial = false) { it.nodeConnected }
@@ -86,7 +86,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val micEnabled: StateFlow<Boolean> = prefs.talkEnabled
 
   val micCooldown: StateFlow<Boolean> = runtimeState(initial = false) { it.micCooldown }
-  val micStatusText: StateFlow<String> = runtimeState(initial = "Mic off") { it.micStatusText }
+  val micStatusText: StateFlow<String> = runtimeState(initial = "麦克风关") { it.micStatusText }
   val micLiveTranscript: StateFlow<String?> = runtimeState(initial = null) { it.micLiveTranscript }
   val micIsListening: StateFlow<Boolean> = runtimeState(initial = false) { it.micIsListening }
   val micQueuedMessages: StateFlow<List<String>> = runtimeState(initial = emptyList()) { it.micQueuedMessages }

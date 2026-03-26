@@ -48,12 +48,12 @@ fun TalkOrbOverlay(
     )
 
   val trimmed = statusText.trim()
-  val showStatus = trimmed.isNotEmpty() && trimmed != "Off"
+  val showStatus = trimmed.isNotEmpty() && trimmed != "Off" && trimmed != "关"
   val phase =
     when {
-      isSpeaking -> "Speaking"
-      isListening -> "Listening"
-      else -> "Thinking"
+      isSpeaking -> "说话中"
+      isListening -> "聆听中"
+      else -> "思考中"
     }
 
   Column(
