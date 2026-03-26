@@ -13,8 +13,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -46,6 +51,8 @@ import ai.openclaw.app.ui.mobileTextSecondary
 import ai.openclaw.app.ui.mobileWarning
 import ai.openclaw.app.ui.mobileWarningSoft
 import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
 
 private data class ChatBubbleStyle(
   val alignEnd: Boolean,
@@ -54,24 +61,25 @@ private data class ChatBubbleStyle(
   val roleColor: Color,
 )
 
+private val numberedLineRegex = Regex("""^\d+[.)]\s+.*$""")
+private const val assistantTextPreviewChars = 420
+private const val assistantMetaPreviewChars = 240
+
 @Composable
 fun ChatMessageBubble(message: ChatMessage) {
   val role = message.role.trim().lowercase(Locale.US)
   val style = bubbleStyle(role)
 
-  // Filter to only displayable content parts (text with content, or base64 images).
+  // Filter to only displayable content parts (text-ish content, or base64 images).
   val displayableContent =
     message.content.filter { part ->
-      when (part.type) {
-        "text" -> !part.text.isNullOrBlank()
-        else -> part.base64 != null
-      }
+      part.base64 != null || !part.text.isNullOrBlank()
     }
 
   if (displayableContent.isEmpty()) return
 
   ChatBubbleContainer(style = style, roleLabel = roleLabel(role)) {
-    ChatMessageBody(content = displayableContent, textColor = mobileText)
+    ChatMessageBody(content = displayableContent, textColor = mobileText, role = role, messageId = message.id)
   }
 }
 
@@ -110,21 +118,294 @@ private fun ChatBubbleContainer(
 }
 
 @Composable
-private fun ChatMessageBody(content: List<ChatMessageContent>, textColor: Color) {
+private fun ChatMessageBody(content: List<ChatMessageContent>, textColor: Color, role: String, messageId: String) {
   Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    for (part in content) {
+    for ((idx, part) in content.withIndex()) {
       when (part.type) {
         "text" -> {
           val text = part.text ?: continue
-          ChatMarkdown(text = text, textColor = textColor)
+          if (role == "user") {
+            UserTextWithDebugToggle(rawText = text, textColor = textColor, stateKey = "$messageId:$idx")
+          } else if (role == "assistant") {
+            AssistantTextCard(
+              title = assistantTypeLabel(part.type),
+              text = text,
+              textColor = textColor,
+              stateKey = "$messageId:$idx:text",
+            )
+          } else {
+            ChatMarkdown(text = text, textColor = textColor)
+          }
         }
         else -> {
-          val b64 = part.base64 ?: continue
-          ChatBase64Image(base64 = b64, mimeType = part.mimeType)
+          if (role == "assistant") {
+            AssistantTypedContentCard(
+              part = part,
+              textColor = textColor,
+              stateKey = "$messageId:$idx:${part.type}",
+            )
+          } else {
+            val b64 = part.base64 ?: continue
+            ChatBase64Image(base64 = b64, mimeType = part.mimeType)
+          }
         }
       }
     }
   }
+}
+
+@Composable
+private fun UserTextWithDebugToggle(rawText: String, textColor: Color, stateKey: String) {
+  var showRaw by rememberSaveable(stateKey) { mutableStateOf(false) }
+  val sanitized = extractUserVisibleInput(rawText)
+  val displayText = if (showRaw) rawText else sanitized
+
+  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    ChatMarkdown(text = displayText, textColor = textColor)
+    if (sanitized != rawText) {
+      TextButton(onClick = { showRaw = !showRaw }) {
+        Text(
+          text = if (showRaw) "显示净化文本" else "显示原文（调试）",
+          style = mobileCaption1,
+          color = mobileTextSecondary,
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun AssistantTextCard(title: String, text: String, textColor: Color, stateKey: String) {
+  var expanded by rememberSaveable(stateKey) { mutableStateOf(false) }
+  val needsCollapse = text.length > assistantTextPreviewChars
+  val display = if (needsCollapse && !expanded) text.take(assistantTextPreviewChars) + "…" else text
+
+  Surface(
+    shape = RoundedCornerShape(10.dp),
+    border = BorderStroke(1.dp, mobileBorder),
+    color = mobileCardSurface.copy(alpha = 0.7f),
+  ) {
+    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      if (title != "文本") {
+        Text(title, style = mobileCaption2, color = mobileTextSecondary)
+      }
+      ChatMarkdown(text = display, textColor = textColor)
+      if (needsCollapse) {
+        TextButton(onClick = { expanded = !expanded }) {
+          Text(if (expanded) "收起" else "展开查看全部", style = mobileCaption1, color = mobileAccent)
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun AssistantTypedContentCard(part: ChatMessageContent, textColor: Color, stateKey: String) {
+  val type = part.type.trim().lowercase(Locale.US)
+  if (part.base64 != null && (type == "image" || part.mimeType?.startsWith("image/") == true)) {
+    Surface(
+      shape = RoundedCornerShape(10.dp),
+      border = BorderStroke(1.dp, mobileBorder),
+      color = mobileCardSurface.copy(alpha = 0.7f),
+    ) {
+      Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("图片", style = mobileCaption2, color = mobileTextSecondary)
+        ChatBase64Image(base64 = part.base64, mimeType = part.mimeType)
+      }
+    }
+    return
+  }
+
+  when (type) {
+    "thinking", "reasoning", "thought" -> {
+      AssistantReasoningCard(part = part, textColor = textColor, stateKey = stateKey)
+    }
+    "tool_call", "toolcall", "tool_result", "toolresult" -> {
+      AssistantToolCard(part = part, textColor = textColor, stateKey = stateKey)
+    }
+    else -> {
+      AssistantMetaCard(part = part, textColor = textColor, stateKey = stateKey)
+    }
+  }
+}
+
+private fun assistantTypeLabel(type: String): String {
+  return when (type.trim().lowercase(Locale.US)) {
+    "text" -> "文本"
+    "image" -> "图片"
+    "tool_call", "toolcall" -> "工具调用"
+    "tool_result", "toolresult" -> "工具结果"
+    "thinking", "reasoning", "thought" -> "思考"
+    else -> "内容 · $type"
+  }
+}
+
+@Composable
+private fun AssistantReasoningCard(part: ChatMessageContent, textColor: Color, stateKey: String) {
+  var expanded by rememberSaveable(stateKey) { mutableStateOf(false) }
+  val raw = part.text?.trim().orEmpty().ifEmpty { "(empty reasoning)" }
+  val needsCollapse = raw.length > assistantMetaPreviewChars
+  val display = if (needsCollapse && !expanded) raw.take(assistantMetaPreviewChars) + "…" else raw
+
+  Surface(
+    shape = RoundedCornerShape(10.dp),
+    border = BorderStroke(1.dp, mobileBorder),
+    color = mobileCardSurface.copy(alpha = 0.55f),
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+      verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+      Text("思考", style = mobileCaption2, color = mobileTextSecondary)
+      Text(display, style = mobileCallout.copy(fontFamily = FontFamily.Monospace), color = mobileTextSecondary)
+      if (needsCollapse) {
+        TextButton(onClick = { expanded = !expanded }) {
+          Text(if (expanded) "收起" else "展开查看全部", style = mobileCaption1, color = mobileAccent)
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun AssistantToolCard(part: ChatMessageContent, textColor: Color, stateKey: String) {
+  var expanded by rememberSaveable(stateKey) { mutableStateOf(false) }
+  val label = assistantTypeLabel(part.type)
+  val rawText = part.text?.trim()
+  val pretty = rawText?.let(::tryPrettyJson)
+  val body = pretty ?: rawText
+
+  val meta =
+    buildString {
+      part.mimeType?.takeIf { it.isNotBlank() }?.let { append("mime=" + it) }
+      part.fileName?.takeIf { it.isNotBlank() }?.let {
+        if (isNotEmpty()) append(" · ")
+        append("file=" + it)
+      }
+      part.base64?.let {
+        if (isNotEmpty()) append(" · ")
+        append("base64Len=" + it.length)
+      }
+    }.ifBlank { null }
+
+  val contentRaw =
+    body
+      ?: buildString {
+        append("type=")
+        append(part.type.ifBlank { "unknown" })
+        part.base64?.let { append("\ncontent(base64Len)=" + it.length) }
+      }
+  val needsCollapse = contentRaw.length > assistantTextPreviewChars
+  val contentDisplay = if (needsCollapse && !expanded) contentRaw.take(assistantTextPreviewChars) + "…" else contentRaw
+
+  Surface(
+    shape = RoundedCornerShape(10.dp),
+    border = BorderStroke(1.dp, mobileCodeBorder),
+    color = mobileCodeBg.copy(alpha = 0.55f),
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+      verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+      Text(label, style = mobileCaption2, color = mobileTextSecondary)
+      meta?.let { Text(it, style = mobileCaption1, color = mobileTextSecondary, fontFamily = FontFamily.Monospace) }
+      ChatMarkdown(text = "```json\n$contentDisplay\n```", textColor = textColor)
+      if (needsCollapse) {
+        TextButton(onClick = { expanded = !expanded }) {
+          Text(if (expanded) "收起" else "展开查看全部", style = mobileCaption1, color = mobileAccent)
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun AssistantMetaCard(part: ChatMessageContent, textColor: Color, stateKey: String) {
+  var expanded by rememberSaveable(stateKey) { mutableStateOf(false) }
+  val metaRaw =
+    buildString {
+      append("type=")
+      append(part.type.ifBlank { "unknown" })
+      part.text?.takeIf { it.isNotBlank() }?.let { append("\ntext=" + it.trim()) }
+      part.mimeType?.takeIf { it.isNotBlank() }?.let { append("\nmime=" + it) }
+      part.fileName?.takeIf { it.isNotBlank() }?.let { append("\nfile=" + it) }
+      part.base64?.let { append("\ncontent(base64Len)=" + it.length) }
+    }
+  val needsCollapse = metaRaw.length > assistantMetaPreviewChars
+  val metaDisplay =
+    if (needsCollapse && !expanded) metaRaw.take(assistantMetaPreviewChars) + "…" else metaRaw
+
+  Surface(
+    shape = RoundedCornerShape(10.dp),
+    border = BorderStroke(1.dp, mobileCodeBorder),
+    color = mobileCodeBg.copy(alpha = 0.55f),
+  ) {
+    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      Text(assistantTypeLabel(part.type), style = mobileCaption2, color = mobileTextSecondary)
+      ChatMarkdown(text = "```text\n$metaDisplay\n```", textColor = textColor)
+      if (needsCollapse) {
+        TextButton(onClick = { expanded = !expanded }) {
+          Text(if (expanded) "收起" else "展开查看全部", style = mobileCaption1, color = mobileAccent)
+        }
+      }
+    }
+  }
+}
+
+private fun tryPrettyJson(raw: String): String? {
+  val trimmed = raw.trim()
+  if (trimmed.isEmpty()) return null
+  return try {
+    when {
+      trimmed.startsWith("{") -> JSONObject(trimmed).toString(2)
+      trimmed.startsWith("[") -> JSONArray(trimmed).toString(2)
+      else -> null
+    }
+  } catch (_: Throwable) {
+    null
+  }
+}
+
+private fun extractUserVisibleInput(raw: String): String {
+  var text = raw.trim()
+  if (text.isEmpty()) return raw
+
+  // Shared channel wrapper used by gateway history contexts.
+  val currentMessageMarker = "[Current message - respond to this]"
+  val markerIdx = text.indexOf(currentMessageMarker, ignoreCase = true)
+  if (markerIdx >= 0) {
+    text =
+      text.substring(markerIdx + currentMessageMarker.length)
+        .trim()
+        .trimStart(':', '：', '-', ' ')
+  }
+
+  val policyHeader = "Skills store policy (operator configured):"
+  if (!text.contains(policyHeader, ignoreCase = true)) return text
+
+  val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+  if (lines.isEmpty()) return text
+
+  // Prefer trailing "[Thu ...] actual input" format.
+  for (line in lines.asReversed()) {
+    if (line.startsWith("[")) {
+      val close = line.indexOf(']')
+      if (close in 1 until line.lastIndex) {
+        val tail = line.substring(close + 1).trim()
+        if (tail.isNotEmpty()) return tail
+      }
+    }
+  }
+
+  // Fallback: last non-policy/non-list line.
+  for (line in lines.asReversed()) {
+    if (line.equals(policyHeader, ignoreCase = true)) continue
+    if (numberedLineRegex.matches(line)) continue
+    if (line.startsWith("`") && line.endsWith("`")) continue
+    return line
+  }
+
+  return text
 }
 
 @Composable

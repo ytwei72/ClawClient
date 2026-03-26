@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import ai.openclaw.app.chat.ChatController
+import ai.openclaw.app.chat.ChatGatewayAgent
 import ai.openclaw.app.chat.ChatMessage
 import ai.openclaw.app.chat.ChatPendingToolCall
 import ai.openclaw.app.chat.ChatSessionEntry
@@ -226,6 +227,8 @@ class NodeRuntime(
 
   private var gatewayDefaultAgentId: String? = null
   private var gatewayAgents: List<GatewayAgentSummary> = emptyList()
+  private val _chatGatewayAgents = MutableStateFlow<List<ChatGatewayAgent>>(emptyList())
+  val chatGatewayAgents: StateFlow<List<ChatGatewayAgent>> = _chatGatewayAgents.asStateFlow()
   private var didAutoRequestCanvasRehydrate = false
   private val canvasRehydrateSeq = AtomicLong(0)
   private var operatorConnected = false
@@ -259,6 +262,7 @@ class NodeRuntime(
         _serverName.value = null
         _remoteAddress.value = null
         _seamColorArgb.value = DEFAULT_SEAM_COLOR_ARGB
+        _chatGatewayAgents.value = emptyList()
         if (!isCanonicalMainSessionKey(_mainSessionKey.value)) {
           _mainSessionKey.value = "main"
         }
@@ -546,6 +550,12 @@ class NodeRuntime(
   val chatPendingToolCalls: StateFlow<List<ChatPendingToolCall>> = chat.pendingToolCalls
   val chatSessions: StateFlow<List<ChatSessionEntry>> = chat.sessions
   val pendingRunCount: StateFlow<Int> = chat.pendingRunCount
+
+  fun refreshGatewayAgentList() {
+    scope.launch {
+      refreshAgentsFromGateway()
+    }
+  }
 
   init {
     if (prefs.voiceWakeMode.value != VoiceWakeMode.Off) {
@@ -995,6 +1005,14 @@ class NodeRuntime(
 
       gatewayDefaultAgentId = defaultAgentId.ifEmpty { null }
       gatewayAgents = agents
+      _chatGatewayAgents.value =
+        agents.map { agent ->
+          ChatGatewayAgent(
+            id = agent.id,
+            name = agent.name,
+            emoji = agent.emoji,
+          )
+        }
       applyMainSessionKey(mainKey)
       updateHomeCanvasState()
     } catch (_: Throwable) {

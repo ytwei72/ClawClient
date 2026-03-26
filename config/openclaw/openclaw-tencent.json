@@ -242,10 +242,11 @@
   "gateway": {
     "port": 16232,
     "mode": "local",
-    "bind": "loopback",
+    "bind": "lan",
     "controlUi": {
       "allowedOrigins": [
-        "http://82.157.180.200:16232"
+        "http://82.157.180.200:16232",
+        "http://localhost:5173"
       ],
       "allowInsecureAuth": false,
       "dangerouslyDisableDeviceAuth": false

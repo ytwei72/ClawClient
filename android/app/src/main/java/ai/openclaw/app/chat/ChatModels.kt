@@ -29,6 +29,13 @@ data class ChatSessionEntry(
   val displayName: String? = null,
 )
 
+/** Agent row from Gateway `agents.list` (for chat UI picker). */
+data class ChatGatewayAgent(
+  val id: String,
+  val name: String?,
+  val emoji: String?,
+)
+
 data class ChatHistory(
   val sessionKey: String,
   val sessionId: String?,

@@ -71,3 +71,59 @@ fun resolveSessionChoices(
 
   return result
 }
+
+/**
+ * Full session list for pickers (no 24h window). Dedupes keys, puts the gateway [mainSessionKey] first,
+ * then every other session newest-first. Hides the literal `"main"` alias when it duplicates [mainSessionKey].
+ */
+fun resolveAllSessionChoices(
+  sessions: List<ChatSessionEntry>,
+  mainSessionKey: String,
+): List<ChatSessionEntry> {
+  val mainKey = mainSessionKey.trim().ifEmpty { "main" }
+  val aliasKey = if (mainKey == "main") null else "main"
+  val sorted = sessions.sortedByDescending { it.updatedAtMs ?: 0L }
+  val seen = mutableSetOf<String>()
+  val result = mutableListOf<ChatSessionEntry>()
+
+  val mainEntry = sorted.firstOrNull { it.key == mainKey }
+  if (mainEntry != null) {
+    result.add(mainEntry)
+    seen.add(mainKey)
+  } else {
+    result.add(ChatSessionEntry(key = mainKey, updatedAtMs = null))
+    seen.add(mainKey)
+  }
+
+  for (entry in sorted) {
+    if (aliasKey != null && entry.key == aliasKey) continue
+    if (!seen.add(entry.key)) continue
+    result.add(entry)
+  }
+
+  return result
+}
+
+internal fun agentIdFromSessionKey(sessionKey: String): String? {
+  val trimmed = sessionKey.trim()
+  if (!trimmed.startsWith("agent:")) return null
+  val agentId = trimmed.removePrefix("agent:").substringBefore(':').trim()
+  return agentId.takeIf { it.isNotEmpty() }
+}
+
+/**
+ * Full session list for a given agent. If [agentId] is null/blank, returns the full list (same as
+ * [resolveAllSessionChoices]).
+ */
+fun resolveAllSessionChoicesForAgent(
+  sessions: List<ChatSessionEntry>,
+  mainSessionKey: String,
+  agentId: String?,
+): List<ChatSessionEntry> {
+  val id = agentId?.trim().orEmpty()
+  if (id.isEmpty()) return resolveAllSessionChoices(sessions = sessions, mainSessionKey = mainSessionKey)
+
+  val prefix = "agent:$id:"
+  val filtered = sessions.filter { it.key.trim().startsWith(prefix) }
+  return resolveAllSessionChoices(sessions = filtered, mainSessionKey = mainSessionKey)
+}

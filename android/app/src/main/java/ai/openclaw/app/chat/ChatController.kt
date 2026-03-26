@@ -1,6 +1,7 @@
 package ai.openclaw.app.chat
 
 import ai.openclaw.app.gateway.GatewaySession
+import android.util.Log
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +25,49 @@ class ChatController(
   private val json: Json,
   private val supportsChatSubscribe: Boolean,
 ) {
+  companion object {
+    /** Use a stable tag so Logcat filtering is easy. */
+    private const val tag = "OpenClawChat"
+  }
+
+  private fun preview(text: String?, maxChars: Int = 180): String {
+    val raw = text?.replace("\n", "\\n")?.replace("\r", "\\r").orEmpty()
+    if (raw.length <= maxChars) return raw
+    return raw.take(maxChars) + "…(len=" + raw.length + ")"
+  }
+
+  private fun summarizeContentBlocks(content: List<ChatMessageContent>, maxBlocks: Int = 6): String {
+    if (content.isEmpty()) return "[]"
+    val blocks =
+      content.take(maxBlocks).map { part ->
+        val type = part.type.trim().ifEmpty { "unknown" }
+        val textBrief = part.text?.takeIf { it.isNotBlank() }?.let { preview(it, 72) }
+        val base64Brief = part.base64?.let { "base64Len=${it.length}" }
+        val mime = part.mimeType?.takeIf { it.isNotBlank() }?.let { "mime=$it" }
+        val file = part.fileName?.takeIf { it.isNotBlank() }?.let { "file=$it" }
+        val details =
+          listOfNotNull(
+            textBrief?.let { "text=$it" },
+            base64Brief,
+            mime,
+            file,
+          ).joinToString(separator = ", ")
+        "{type=$type${if (details.isNotEmpty()) ", $details" else ""}}"
+      }
+    val suffix = if (content.size > maxBlocks) ", … +${content.size - maxBlocks}" else ""
+    return "[" + blocks.joinToString(separator = ", ") + suffix + "]"
+  }
+
+  private fun summarizeMessages(messages: List<ChatMessage>, maxMessages: Int = 8): String {
+    if (messages.isEmpty()) return "[]"
+    val items =
+      messages.takeLast(maxMessages).map { msg ->
+        val role = msg.role.trim().lowercase().ifEmpty { "unknown" }
+        "{role=$role, content=${summarizeContentBlocks(msg.content)}}"
+      }
+    val prefix = if (messages.size > maxMessages) "…(${messages.size - maxMessages} older) " else ""
+    return prefix + items.joinToString(separator = " | ")
+  }
   private val _sessionKey = MutableStateFlow("main")
   val sessionKey: StateFlow<String> = _sessionKey.asStateFlow()
 
@@ -62,6 +106,7 @@ class ChatController(
   private var lastHealthPollAtMs: Long? = null
 
   fun onDisconnected(message: String) {
+    Log.i(tag, "disconnected: ${preview(message, 240)}")
     _healthOk.value = false
     // Not an error; keep connection status in the UI pill.
     _errorText.value = null
@@ -75,6 +120,7 @@ class ChatController(
   fun load(sessionKey: String) {
     val key = sessionKey.trim().ifEmpty { "main" }
     _sessionKey.value = key
+    Log.i(tag, "load sessionKey=$key")
     scope.launch { bootstrap(forceHealth = true, refreshSessions = true) }
   }
 
@@ -84,14 +130,17 @@ class ChatController(
     if (_sessionKey.value == trimmed) return
     if (_sessionKey.value != "main") return
     _sessionKey.value = trimmed
+    Log.i(tag, "applyMainSessionKey -> $trimmed")
     scope.launch { bootstrap(forceHealth = true, refreshSessions = true) }
   }
 
   fun refresh() {
+    Log.i(tag, "refresh sessionKey=${_sessionKey.value}")
     scope.launch { bootstrap(forceHealth = true, refreshSessions = true) }
   }
 
   fun refreshSessions(limit: Int? = null) {
+    Log.i(tag, "refreshSessions limit=$limit")
     scope.launch { fetchSessions(limit = limit) }
   }
 
@@ -106,6 +155,7 @@ class ChatController(
     if (key.isEmpty()) return
     if (key == _sessionKey.value) return
     _sessionKey.value = key
+    Log.i(tag, "switchSession -> $key")
     // Keep the thread switch path lean: history + health are needed immediately,
     // but the session list is usually unchanged and can refresh on explicit pull-to-refresh.
     scope.launch { bootstrap(forceHealth = true, refreshSessions = false) }
@@ -127,6 +177,24 @@ class ChatController(
     val text = if (trimmed.isEmpty() && attachments.isNotEmpty()) "请查看附件。" else trimmed
     val sessionKey = _sessionKey.value
     val thinking = normalizeThinking(thinkingLevel)
+
+    val attSummary =
+      attachments.joinToString(separator = ", ") { att ->
+        "${att.type} mime=${att.mimeType} file=${att.fileName} b64Len=${att.base64.length}"
+      }
+    Log.i(
+      tag,
+      "send userInput=${preview(trimmed)} sessionKey=$sessionKey thinking=$thinking idempotencyKey=$runId " +
+        "textLen=${text.length} attachments=${attachments.size} [$attSummary]",
+    )
+    val contentParts =
+      buildList {
+        add("text(len=${text.length})")
+        for (att in attachments) {
+          add("${att.type}(mime=${att.mimeType},file=${att.fileName},b64Len=${att.base64.length})")
+        }
+      }.joinToString(separator = " | ")
+    Log.i(tag, "send userMessage.contentParts: $contentParts")
 
     // Optimistic user message.
     val userContent =
@@ -188,7 +256,12 @@ class ChatController(
               )
             }
           }
+        runCatching {
+          val raw = params.toString()
+          Log.i(tag, "send paramsJson=${preview(raw, 800)}")
+        }
         val res = session.request("chat.send", params.toString())
+        Log.i(tag, "send ok runId=$runId res=${preview(res, 400)}")
         val actualRunId = parseRunId(res) ?: runId
         if (actualRunId != runId) {
           clearPendingRun(runId)
@@ -201,6 +274,7 @@ class ChatController(
       } catch (err: Throwable) {
         clearPendingRun(runId)
         _errorText.value = err.message
+        Log.w(tag, "send failed runId=$runId err=${err.message}", err)
       }
     }
   }
@@ -261,6 +335,7 @@ class ChatController(
     _sessionId.value = null
 
     val key = _sessionKey.value
+    Log.i(tag, "bootstrap start sessionKey=$key forceHealth=$forceHealth refreshSessions=$refreshSessions")
     try {
       if (supportsChatSubscribe) {
         session.sendNodeEvent("chat.subscribe", """{"sessionKey":"$key"}""")
@@ -271,6 +346,12 @@ class ChatController(
       _messages.value = history.messages
       _sessionId.value = history.sessionId
       history.thinkingLevel?.trim()?.takeIf { it.isNotEmpty() }?.let { _thinkingLevel.value = it }
+      Log.i(
+        tag,
+        "bootstrap history loaded sessionId=${history.sessionId} thinking=${history.thinkingLevel} " +
+          "messages=${history.messages.size} historyRaw=${preview(historyJson, 700)} " +
+          "parsed=${summarizeMessages(history.messages)}",
+      )
 
       pollHealthIfNeeded(force = forceHealth)
       if (refreshSessions) {
@@ -278,6 +359,7 @@ class ChatController(
       }
     } catch (err: Throwable) {
       _errorText.value = err.message
+      Log.w(tag, "bootstrap failed sessionKey=$key err=${err.message}", err)
     }
   }
 
@@ -326,12 +408,19 @@ class ChatController(
         val text = parseAssistantDeltaText(payload)
         if (!text.isNullOrEmpty()) {
           _streamingAssistantText.value = text
+          Log.i(tag, "recv chat.delta runId=$runId sessionKey=${_sessionKey.value} text=${preview(text, 120)}")
         }
       }
       "final", "aborted", "error" -> {
         if (state == "error") {
           _errorText.value = payload["errorMessage"].asStringOrNull() ?: "聊天失败"
         }
+        val finalText = parseAssistantDeltaText(payload)
+        Log.i(
+          tag,
+          "recv chat.$state runId=$runId sessionKey=${_sessionKey.value} " +
+            "error=${preview(_errorText.value, 180)} text=${preview(finalText, 200)}",
+        )
         if (runId != null) clearPendingRun(runId) else clearPendingRuns()
         pendingToolCallsById.clear()
         publishPendingToolCalls()
@@ -344,6 +433,12 @@ class ChatController(
             _messages.value = history.messages
             _sessionId.value = history.sessionId
             history.thinkingLevel?.trim()?.takeIf { it.isNotEmpty() }?.let { _thinkingLevel.value = it }
+            Log.i(
+              tag,
+              "refresh history loaded sessionId=${history.sessionId} thinking=${history.thinkingLevel} " +
+                "messages=${history.messages.size} historyRaw=${preview(historyJson, 700)} " +
+                "parsed=${summarizeMessages(history.messages)}",
+            )
           } catch (_: Throwable) {
             // best-effort
           }
@@ -365,6 +460,7 @@ class ChatController(
         val text = data?.get("text")?.asStringOrNull()
         if (!text.isNullOrEmpty()) {
           _streamingAssistantText.value = text
+          Log.i(tag, "recv agent.assistant sessionKey=${_sessionKey.value} text=${preview(text, 160)}")
         }
       }
       "tool" -> {
@@ -392,6 +488,7 @@ class ChatController(
       }
       "error" -> {
         _errorText.value = "事件流中断，请尝试刷新。"
+        Log.w(tag, "recv agent.error sessionKey=${_sessionKey.value}")
         clearPendingRuns()
         pendingToolCallsById.clear()
         publishPendingToolCalls()
@@ -489,16 +586,31 @@ class ChatController(
   private fun parseMessageContent(el: JsonElement): ChatMessageContent? {
     val obj = el.asObjectOrNull() ?: return null
     val type = obj["type"].asStringOrNull() ?: "text"
-    return if (type == "text") {
-      ChatMessageContent(type = "text", text = obj["text"].asStringOrNull())
-    } else {
-      ChatMessageContent(
-        type = type,
-        mimeType = obj["mimeType"].asStringOrNull(),
-        fileName = obj["fileName"].asStringOrNull(),
-        base64 = obj["content"].asStringOrNull(),
-      )
-    }
+    val lowered = type.trim().lowercase()
+    val mimeType = obj["mimeType"].asStringOrNull()
+    val fileName = obj["fileName"].asStringOrNull()
+
+    // Common text-like payload keys used by different providers.
+    val text =
+      when (lowered) {
+        "text" -> obj["text"].asStringOrNull()
+        "thinking", "reasoning", "thought" -> obj["thinking"].asStringOrNull() ?: obj["text"].asStringOrNull()
+        else ->
+          obj["text"].asStringOrNull()
+            ?: obj["thinking"].asStringOrNull()
+            ?: obj["content"].asStringOrNull()?.takeIf { mimeType == null } // sometimes non-media uses "content"
+            ?: obj.toString()
+      }
+
+    val base64 = obj["content"].asStringOrNull()?.takeIf { it.isNotBlank() && mimeType != null }
+
+    return ChatMessageContent(
+      type = type,
+      text = text?.takeIf { it.isNotBlank() },
+      mimeType = mimeType,
+      fileName = fileName,
+      base64 = base64,
+    )
   }
 
   private fun parseSessions(jsonString: String): List<ChatSessionEntry> {

@@ -1,0 +1,6 @@
+{
+  "recommendations": [
+    "fwcd.kotlin",
+    "tamasfe.even-better-toml"
+  ]
+}

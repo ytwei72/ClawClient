@@ -7,21 +7,32 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -30,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.openclaw.app.MainViewModel
+import ai.openclaw.app.chat.ChatGatewayAgent
 import ai.openclaw.app.chat.ChatSessionEntry
 import ai.openclaw.app.chat.OutgoingAttachment
 import ai.openclaw.app.ui.mobileAccent
@@ -42,12 +54,14 @@ import ai.openclaw.app.ui.mobileCaption1
 import ai.openclaw.app.ui.mobileCaption2
 import ai.openclaw.app.ui.mobileDanger
 import ai.openclaw.app.ui.mobileDangerSoft
+import ai.openclaw.app.ui.mobileHeadline
 import ai.openclaw.app.ui.mobileText
 import ai.openclaw.app.ui.mobileTextSecondary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatSheetContent(viewModel: MainViewModel) {
   val messages by viewModel.chatMessages.collectAsState()
@@ -60,9 +74,25 @@ fun ChatSheetContent(viewModel: MainViewModel) {
   val streamingAssistantText by viewModel.chatStreamingAssistantText.collectAsState()
   val pendingToolCalls by viewModel.chatPendingToolCalls.collectAsState()
   val sessions by viewModel.chatSessions.collectAsState()
+  val gatewayAgents by viewModel.chatGatewayAgents.collectAsState()
+  val isConnected by viewModel.isConnected.collectAsState()
+  var showAllSessions by remember { mutableStateOf(false) }
+  var selectedAgentId by remember { mutableStateOf<String?>(null) }
 
   LaunchedEffect(mainSessionKey) {
     viewModel.loadChat(mainSessionKey)
+  }
+
+  LaunchedEffect(sessionKey) {
+    // Keep picker in sync when the user switches sessions directly.
+    selectedAgentId = agentIdFromSessionKey(sessionKey)
+  }
+
+  LaunchedEffect(isConnected) {
+    if (isConnected) {
+      viewModel.refreshChatGatewayAgents()
+      viewModel.refreshChatSessions(limit = 500)
+    }
   }
 
   val context = LocalContext.current
@@ -96,12 +126,133 @@ fun ChatSheetContent(viewModel: MainViewModel) {
         .padding(horizontal = 20.dp, vertical = 12.dp),
     verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
+    ChatGatewaySelector(
+      agents = gatewayAgents,
+      sessionKey = sessionKey,
+      mainSessionKey = mainSessionKey,
+      onSelectGatewayDefault = {
+        val key = mainSessionKey.trim().ifEmpty { "main" }
+        selectedAgentId = agentIdFromSessionKey(key)
+        viewModel.switchChatSession(key)
+      },
+      onSelectAgent = { agentId ->
+        selectedAgentId = agentId.trim().ifEmpty { null }
+        viewModel.switchChatSession(chatSessionKeyForAgent(agentId))
+      },
+    )
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Text(
+        text = "最近会话",
+        style = mobileCaption2.copy(letterSpacing = 0.5.sp, fontWeight = FontWeight.SemiBold),
+        color = mobileTextSecondary,
+      )
+      TextButton(
+        onClick = { showAllSessions = true },
+        enabled = sessions.isNotEmpty() || mainSessionKey.isNotBlank(),
+      ) {
+        Text("全部历史…", style = mobileCaption1, color = mobileAccent)
+      }
+    }
+
     ChatThreadSelector(
       sessionKey = sessionKey,
       sessions = sessions,
       mainSessionKey = mainSessionKey,
       onSelectSession = { key -> viewModel.switchChatSession(key) },
     )
+
+    if (showAllSessions) {
+      val allSessions =
+        remember(sessions, mainSessionKey, selectedAgentId) {
+          resolveAllSessionChoicesForAgent(
+            sessions = sessions,
+            mainSessionKey = mainSessionKey,
+            agentId = selectedAgentId,
+          )
+        }
+      val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+      ModalBottomSheet(
+        onDismissRequest = { showAllSessions = false },
+        sheetState = sheetState,
+        containerColor = mobileCardSurface,
+        contentColor = mobileText,
+        tonalElevation = 0.dp,
+      ) {
+        Column(
+          modifier =
+            Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+          val agentLabel =
+            remember(selectedAgentId, gatewayAgents) {
+              val id = selectedAgentId?.trim().orEmpty()
+              if (id.isEmpty()) return@remember null
+              val match = gatewayAgents.firstOrNull { it.id.trim() == id }
+              val name = match?.name?.trim().orEmpty()
+              val emoji = match?.emoji?.trim().orEmpty()
+              buildString {
+                if (emoji.isNotEmpty()) {
+                  append(emoji)
+                  append(' ')
+                }
+                append(if (name.isNotEmpty()) name else id)
+              }
+            }
+          Text(
+            text = if (agentLabel != null) "历史会话 · $agentLabel" else "历史会话",
+            style = mobileHeadline,
+            color = mobileText,
+          )
+          Text(
+            text = "选择与不同渠道或线程对应的会话键；智能体会话通常为 agent:<id>:main。",
+            style = mobileCaption1,
+            color = mobileTextSecondary,
+          )
+          Spacer(modifier = Modifier.height(8.dp))
+          LazyColumn(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            items(items = allSessions, key = { it.key }) { entry ->
+              val active = entry.key == sessionKey
+              Surface(
+                onClick = {
+                  viewModel.switchChatSession(entry.key)
+                  showAllSessions = false
+                },
+                shape = RoundedCornerShape(12.dp),
+                color = if (active) mobileAccent.copy(alpha = 0.22f) else mobileCardSurface,
+                border = BorderStroke(1.dp, if (active) mobileAccentBorderStrong else mobileBorderStrong),
+              ) {
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                  Text(
+                    text = friendlySessionName(entry.displayName ?: entry.key),
+                    style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
+                    color = mobileText,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                  Text(
+                    text = entry.key,
+                    style = mobileCaption2,
+                    color = mobileTextSecondary,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                }
+              }
+            }
+          }
+          Spacer(modifier = Modifier.height(24.dp))
+        }
+      }
+    }
 
     if (!errorText.isNullOrBlank()) {
       ChatErrorRail(errorText = errorText!!)
@@ -127,7 +278,8 @@ fun ChatSheetContent(viewModel: MainViewModel) {
         onSetThinkingLevel = { level -> viewModel.setChatThinkingLevel(level) },
         onRefresh = {
           viewModel.refreshChat()
-          viewModel.refreshChatSessions(limit = 200)
+          viewModel.refreshChatSessions(limit = 500)
+          viewModel.refreshChatGatewayAgents()
         },
         onAbort = { viewModel.abortChat() },
         onSend = { text ->
@@ -144,6 +296,89 @@ fun ChatSheetContent(viewModel: MainViewModel) {
           attachments.clear()
         },
       )
+    }
+  }
+}
+
+private fun chatSessionKeyForAgent(agentId: String): String {
+  val id = agentId.trim()
+  return if (id.isEmpty()) "main" else "agent:$id:main"
+}
+
+private fun gatewayMainSessionChipLabel(mainSessionKey: String): String {
+  val m = mainSessionKey.trim()
+  if (m.isEmpty() || m == "main") return "默认 (main)"
+  return "默认 · ${friendlySessionName(m)}"
+}
+
+@Composable
+private fun ChatGatewaySelector(
+  agents: List<ChatGatewayAgent>,
+  sessionKey: String,
+  mainSessionKey: String,
+  onSelectGatewayDefault: () -> Unit,
+  onSelectAgent: (String) -> Unit,
+) {
+  val canonicalMain = mainSessionKey.trim().ifEmpty { "main" }
+  val gatewayDefaultActive = sessionKey.trim() == canonicalMain
+  val sortedAgents =
+    remember(agents) {
+      agents
+        .filter { it.id.isNotBlank() }
+        .sortedWith(compareBy({ it.name?.lowercase().orEmpty() }, { it.id.lowercase() }))
+    }
+
+  Row(
+    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    Surface(
+      onClick = onSelectGatewayDefault,
+      shape = RoundedCornerShape(14.dp),
+      color = if (gatewayDefaultActive) mobileAccent else mobileCardSurface,
+      border = BorderStroke(1.dp, if (gatewayDefaultActive) mobileAccentBorderStrong else mobileBorderStrong),
+      tonalElevation = 0.dp,
+      shadowElevation = 0.dp,
+    ) {
+      Text(
+        text = gatewayMainSessionChipLabel(mainSessionKey),
+        style = mobileCaption1.copy(fontWeight = if (gatewayDefaultActive) FontWeight.Bold else FontWeight.SemiBold),
+        color = if (gatewayDefaultActive) Color.White else mobileText,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+      )
+    }
+
+    for (agent in sortedAgents) {
+      val agentKey = chatSessionKeyForAgent(agent.id)
+      val active = sessionKey.trim() == agentKey
+      val label =
+        buildString {
+          val em = agent.emoji?.trim().orEmpty()
+          if (em.isNotEmpty()) {
+            append(em)
+            append(' ')
+          }
+          append(agent.name?.trim()?.takeIf { it.isNotEmpty() } ?: agent.id)
+        }
+      Surface(
+        onClick = { onSelectAgent(agent.id) },
+        shape = RoundedCornerShape(14.dp),
+        color = if (active) mobileAccent else mobileCardSurface,
+        border = BorderStroke(1.dp, if (active) mobileAccentBorderStrong else mobileBorderStrong),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+      ) {
+        Text(
+          text = label,
+          style = mobileCaption1.copy(fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold),
+          color = if (active) Color.White else mobileText,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+        )
+      }
     }
   }
 }

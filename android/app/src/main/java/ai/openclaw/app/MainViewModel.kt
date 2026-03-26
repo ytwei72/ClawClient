@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.viewModelScope
+import ai.openclaw.app.chat.ChatGatewayAgent
 import ai.openclaw.app.chat.ChatMessage
 import ai.openclaw.app.chat.ChatPendingToolCall
 import ai.openclaw.app.chat.ChatSessionEntry
@@ -103,6 +104,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val chatStreamingAssistantText: StateFlow<String?> = runtimeState(initial = null) { it.chatStreamingAssistantText }
   val chatPendingToolCalls: StateFlow<List<ChatPendingToolCall>> = runtimeState(initial = emptyList()) { it.chatPendingToolCalls }
   val chatSessions: StateFlow<List<ChatSessionEntry>> = runtimeState(initial = emptyList()) { it.chatSessions }
+  val chatGatewayAgents: StateFlow<List<ChatGatewayAgent>> =
+    runtimeState(initial = emptyList()) { it.chatGatewayAgents }
   val pendingRunCount: StateFlow<Int> = runtimeState(initial = 0) { it.pendingRunCount }
 
   init {
@@ -259,6 +262,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun refreshChatSessions(limit: Int? = null) {
     ensureRuntime().refreshChatSessions(limit = limit)
+  }
+
+  fun refreshChatGatewayAgents() {
+    ensureRuntime().refreshGatewayAgentList()
   }
 
   fun setChatThinkingLevel(level: String) {
