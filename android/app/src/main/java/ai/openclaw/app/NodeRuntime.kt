@@ -22,6 +22,8 @@ import ai.openclaw.app.node.*
 import ai.openclaw.app.protocol.OpenClawCanvasA2UIAction
 import ai.openclaw.app.voice.MicCaptureManager
 import ai.openclaw.app.voice.TalkModeManager
+import ai.openclaw.app.voice.HotwordService
+import ai.openclaw.app.voice.HotwordDebugLogger
 import ai.openclaw.app.voice.VoiceConversationEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +45,10 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
+import androidx.core.content.ContextCompat.registerReceiver
 
 class NodeRuntime(
   context: Context,
@@ -58,6 +64,7 @@ class NodeRuntime(
   private val json = Json { ignoreUnknownKeys = true }
 
   private val externalAudioCaptureActive = MutableStateFlow(false)
+  private var hotwordRunning = false
 
   private val discovery = GatewayDiscovery(appContext, scope = scope)
   val gateways: StateFlow<List<GatewayEndpoint>> = discovery.gateways
@@ -371,6 +378,14 @@ class NodeRuntime(
     )
   }
 
+  private val hotwordWakeReceiver =
+    object : BroadcastReceiver() {
+      override fun onReceive(context: Context?, intent: Intent?) {
+        if (intent?.action != HotwordService.actionWakeTriggered) return
+        setMicEnabled(true)
+      }
+    }
+
   val micStatusText: StateFlow<String>
     get() = micCapture.statusText
 
@@ -558,9 +573,12 @@ class NodeRuntime(
   }
 
   init {
-    if (prefs.voiceWakeMode.value != VoiceWakeMode.Off) {
-      prefs.setVoiceWakeMode(VoiceWakeMode.Off)
-    }
+    registerReceiver(
+      appContext,
+      hotwordWakeReceiver,
+      IntentFilter(HotwordService.actionWakeTriggered),
+      ContextCompat.RECEIVER_NOT_EXPORTED,
+    )
 
     scope.launch {
       prefs.loadGatewayToken()
@@ -577,6 +595,19 @@ class NodeRuntime(
           scope.launch { talkMode.ensureChatSubscribed() }
         }
         externalAudioCaptureActive.value = enabled
+        refreshHotwordServiceState()
+      }
+    }
+
+    scope.launch {
+      prefs.voiceWakeMode.collect {
+        refreshHotwordServiceState()
+      }
+    }
+
+    scope.launch {
+      prefs.wakeWords.collect {
+        refreshHotwordServiceState()
       }
     }
 
@@ -613,6 +644,7 @@ class NodeRuntime(
     } else {
       stopActiveVoiceSession()
     }
+    refreshHotwordServiceState()
   }
 
   private fun seedLastDiscoveredGateway(list: List<GatewayEndpoint>) {
@@ -700,6 +732,7 @@ class NodeRuntime(
       stopActiveVoiceSession()
     }
     // Don't re-enable on active=true; mic toggle drives that
+    refreshHotwordServiceState()
   }
 
   fun setMicEnabled(value: Boolean) {
@@ -712,6 +745,27 @@ class NodeRuntime(
     }
     micCapture.setMicEnabled(value)
     externalAudioCaptureActive.value = value
+    refreshHotwordServiceState()
+  }
+
+  fun setVoiceWakeMode(mode: VoiceWakeMode) {
+    prefs.setVoiceWakeMode(mode)
+    refreshHotwordServiceState()
+  }
+
+  fun setWakeWords(words: List<String>) {
+    prefs.setWakeWords(words)
+    refreshHotwordServiceState()
+  }
+
+  fun triggerHotwordWakeTest(): String {
+    if (!hasRecordAudioPermission()) {
+      HotwordDebugLogger.log("手动测试失败：缺少 RECORD_AUDIO 权限")
+      return "测试失败：麦克风权限未授权"
+    }
+    HotwordDebugLogger.log("手动测试：模拟命中唤醒词")
+    appContext.sendBroadcast(Intent(HotwordService.actionWakeTriggered).setPackage(appContext.packageName))
+    return "测试已触发：已发送唤醒事件"
   }
 
   val speakerEnabled: StateFlow<Boolean>
@@ -732,6 +786,29 @@ class NodeRuntime(
     micCapture.setMicEnabled(false)
     prefs.setTalkEnabled(false)
     externalAudioCaptureActive.value = false
+    refreshHotwordServiceState()
+  }
+
+  private fun refreshHotwordServiceState() {
+    val mode = prefs.voiceWakeMode.value
+    val micBusy = prefs.talkEnabled.value
+    val shouldRun =
+      when (mode) {
+        VoiceWakeMode.Off -> false
+        VoiceWakeMode.Foreground -> _isForeground.value && !micBusy
+        VoiceWakeMode.Always -> !micBusy
+      } && hasRecordAudioPermission()
+
+    if (shouldRun == hotwordRunning) return
+    if (shouldRun) {
+      hotwordRunning = HotwordService.start(appContext, prefs.wakeWords.value)
+      if (!hotwordRunning) {
+        prefs.setVoiceWakeMode(VoiceWakeMode.Off)
+      }
+    } else {
+      HotwordService.stop(appContext)
+      hotwordRunning = false
+    }
   }
 
   fun refreshGatewayConnection() {

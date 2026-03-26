@@ -48,6 +48,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,6 +69,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import ai.openclaw.app.BuildConfig
 import ai.openclaw.app.LocationMode
 import ai.openclaw.app.MainViewModel
+import ai.openclaw.app.VoiceWakeMode
 import ai.openclaw.app.node.DeviceNotificationListenerService
 
 @Composable
@@ -81,6 +83,15 @@ fun SettingsSheet(viewModel: MainViewModel) {
   val locationPreciseEnabled by viewModel.locationPreciseEnabled.collectAsState()
   val preventSleep by viewModel.preventSleep.collectAsState()
   val canvasDebugStatusEnabled by viewModel.canvasDebugStatusEnabled.collectAsState()
+  val voiceWakeMode by viewModel.voiceWakeMode.collectAsState()
+  val wakeWords by viewModel.wakeWords.collectAsState()
+  val hotwordDebugLogs by viewModel.hotwordDebugLogs.collectAsState()
+  var wakeWordsDraft by remember(wakeWords) { mutableStateOf(wakeWords.joinToString(", ")) }
+  var hotwordTestStatus by remember { mutableStateOf<String?>(null) }
+
+  LaunchedEffect(voiceWakeMode) {
+    hotwordTestStatus = null
+  }
 
   val listState = rememberLazyListState()
   val deviceModel =
@@ -401,6 +412,50 @@ fun SettingsSheet(viewModel: MainViewModel) {
         }
       }
 
+      item {
+        Text(
+          "热词调试日志",
+          style = mobileCaption1.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+          color = mobileAccent,
+        )
+      }
+      item {
+        Column(modifier = Modifier.settingsRowModifier()) {
+          Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Text("最近 ${hotwordDebugLogs.size} 条", style = mobileCallout, color = mobileTextSecondary)
+            Button(
+              onClick = {
+                viewModel.clearHotwordDebugLogs()
+                hotwordTestStatus = null
+              },
+              enabled = hotwordDebugLogs.isNotEmpty(),
+              colors = settingsPrimaryButtonColors(),
+              shape = RoundedCornerShape(12.dp),
+            ) {
+              Text("清空", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
+            }
+          }
+          HorizontalDivider(color = mobileBorder)
+          Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            if (hotwordDebugLogs.isEmpty()) {
+              Text("暂无日志", style = mobileCallout, color = mobileTextTertiary)
+            } else {
+              hotwordDebugLogs.takeLast(20).forEach { line ->
+                Text(
+                  line,
+                  style = mobileCaption1.copy(fontFamily = FontFamily.Monospace),
+                  color = mobileTextSecondary,
+                  modifier = Modifier.padding(vertical = 2.dp),
+                )
+              }
+            }
+          }
+        }
+      }
+
       // ── Media ──
       item {
         Text(
@@ -448,6 +503,109 @@ fun SettingsSheet(viewModel: MainViewModel) {
             supportingContent = { Text("拍照与短视频（仅前台）。", style = mobileCallout) },
             trailingContent = { Switch(checked = cameraEnabled, onCheckedChange = ::setCameraEnabledChecked) },
           )
+        }
+      }
+
+      item {
+        Text(
+          "语音唤醒",
+          style = mobileCaption1.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+          color = mobileAccent,
+        )
+      }
+      item {
+        Column(modifier = Modifier.settingsRowModifier()) {
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = { Text("关闭", style = mobileHeadline) },
+            supportingContent = { Text("不启用后台热词监听。", style = mobileCallout) },
+            trailingContent = {
+              RadioButton(
+                selected = voiceWakeMode == VoiceWakeMode.Off,
+                onClick = { viewModel.setVoiceWakeMode(VoiceWakeMode.Off) },
+              )
+            },
+          )
+          HorizontalDivider(color = mobileBorder)
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = { Text("仅前台", style = mobileHeadline) },
+            supportingContent = { Text("应用在前台时监听唤醒词。", style = mobileCallout) },
+            trailingContent = {
+              RadioButton(
+                selected = voiceWakeMode == VoiceWakeMode.Foreground,
+                onClick = { viewModel.setVoiceWakeMode(VoiceWakeMode.Foreground) },
+              )
+            },
+          )
+          HorizontalDivider(color = mobileBorder)
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = { Text("始终监听", style = mobileHeadline) },
+            supportingContent = { Text("后台前台均可唤醒（更耗电）。", style = mobileCallout) },
+            trailingContent = {
+              RadioButton(
+                selected = voiceWakeMode == VoiceWakeMode.Always,
+                onClick = { viewModel.setVoiceWakeMode(VoiceWakeMode.Always) },
+              )
+            },
+          )
+          HorizontalDivider(color = mobileBorder)
+          Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            OutlinedTextField(
+              value = wakeWordsDraft,
+              onValueChange = { wakeWordsDraft = it },
+              label = { Text("唤醒词（逗号分隔）", style = mobileCaption1, color = mobileTextSecondary) },
+              modifier = Modifier.fillMaxWidth(),
+              textStyle = mobileBody.copy(color = mobileText),
+              colors = settingsTextFieldColors(),
+              singleLine = true,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              Button(
+                onClick = {
+                  val parsed =
+                    wakeWordsDraft
+                      .split(',')
+                      .map { it.trim() }
+                      .filter { it.isNotEmpty() }
+                  viewModel.setWakeWords(parsed)
+                },
+                colors = settingsPrimaryButtonColors(),
+                shape = RoundedCornerShape(12.dp),
+              ) {
+                Text("保存", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
+              }
+              Button(
+                onClick = {
+                  hotwordTestStatus = viewModel.triggerHotwordWakeTest()
+                },
+                colors = settingsPrimaryButtonColors(),
+                shape = RoundedCornerShape(12.dp),
+              ) {
+                Text("测试唤醒", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
+              }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+              "测试会模拟命中唤醒词并拉起麦克风，可在上方热词调试日志查看记录。",
+              style = mobileCaption1,
+              color = mobileTextTertiary,
+            )
+            hotwordTestStatus?.let { status ->
+              val isFailure = status.startsWith("测试失败")
+              Spacer(modifier = Modifier.height(6.dp))
+              Text(
+                status,
+                style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
+                color = if (isFailure) mobileDanger else mobileAccent,
+              )
+            }
+          }
         }
       }
 

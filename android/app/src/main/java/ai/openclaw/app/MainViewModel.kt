@@ -13,6 +13,7 @@ import ai.openclaw.app.gateway.GatewayEndpoint
 import ai.openclaw.app.node.CameraCaptureManager
 import ai.openclaw.app.node.CanvasController
 import ai.openclaw.app.node.SmsManager
+import ai.openclaw.app.voice.HotwordDebugLogger
 import ai.openclaw.app.voice.VoiceConversationEntry
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -85,6 +86,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val canvasDebugStatusEnabled: StateFlow<Boolean> = prefs.canvasDebugStatusEnabled
   val speakerEnabled: StateFlow<Boolean> = prefs.speakerEnabled
   val micEnabled: StateFlow<Boolean> = prefs.talkEnabled
+  val voiceWakeMode: StateFlow<VoiceWakeMode> = prefs.voiceWakeMode
+  val wakeWords: StateFlow<List<String>> = prefs.wakeWords
+  val hotwordDebugLogs: StateFlow<List<String>> = HotwordDebugLogger.logs
 
   val micCooldown: StateFlow<Boolean> = runtimeState(initial = false) { it.micCooldown }
   val micStatusText: StateFlow<String> = runtimeState(initial = "麦克风关") { it.micStatusText }
@@ -210,6 +214,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setSpeakerEnabled(enabled: Boolean) {
     ensureRuntime().setSpeakerEnabled(enabled)
+  }
+
+  fun setVoiceWakeMode(mode: VoiceWakeMode) {
+    ensureRuntime().setVoiceWakeMode(mode)
+  }
+
+  fun setWakeWords(words: List<String>) {
+    ensureRuntime().setWakeWords(words)
+  }
+
+  fun triggerHotwordWakeTest(): String {
+    return ensureRuntime().triggerHotwordWakeTest()
+  }
+
+  fun clearHotwordDebugLogs() {
+    HotwordDebugLogger.clear()
   }
 
   fun refreshGatewayConnection() {
