@@ -2,6 +2,8 @@
 
 在 **ClawClient** 仓库中，请在 Android Studio 里直接打开本仓库根目录下的 `android/` 文件夹（等价于上游 monorepo 里的 `apps/android`，并附带 `shared/.../Resources`）。**openclaw-assistant** 请在本机单独克隆仓库对照阅读，路径见 `docs/TODOs.md`。其余构建命令将下文中的 `apps/android` 理解为当前 `android` 目录即可。
 
+若 **仅 `org.vosk` 在 Android Studio 中红线**、命令行却能编译：请先 **Sync Project with Gradle Files**，仍不行则 **File → Invalidate Caches**。工程已将 Vosk 通过薄模块 `vosk-api` 以 `api` 传递，便于 IDE 建立 Kotlin classpath。
+
 Status: **extremely alpha**. The app is actively being rebuilt from the ground up.
 
 ### Rebuild Checklist

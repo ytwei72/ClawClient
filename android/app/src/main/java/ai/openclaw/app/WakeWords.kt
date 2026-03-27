@@ -4,6 +4,13 @@ object WakeWords {
   const val maxWords: Int = 32
   const val maxWordLength: Int = 64
 
+  /**
+   * Vosk 路径下热词命中会先对识别文本与唤醒词做 ASCII 归一化（见
+   * `HotwordService.normalizeForWakeMatch`），中文等非 ASCII 词无法匹配，故 UI
+   * 仅展示此类选项；默认唤醒词与此列表一致。
+   */
+  val voskWakeWordMenuOptions: List<String> = listOf("openclaw", "claude")
+
   fun parseCommaSeparated(input: String): List<String> {
     return input.split(",").map { it.trim() }.filter { it.isNotEmpty() }
   }

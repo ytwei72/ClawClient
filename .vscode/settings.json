@@ -1,0 +1,6 @@
+{
+  "gradle.nestedProjects": true,
+  "java.configuration.updateBuildConfiguration": "automatic",
+  "java.import.gradle.enabled": true,
+  "java.import.gradle.wrapper.enabled": true
+}

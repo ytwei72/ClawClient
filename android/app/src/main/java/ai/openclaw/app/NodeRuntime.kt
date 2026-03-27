@@ -65,6 +65,7 @@ class NodeRuntime(
 
   private val externalAudioCaptureActive = MutableStateFlow(false)
   private var hotwordRunning = false
+  private var lastHotwordSessionKey: String? = null
   private val wakeTraceTag = "WakeTrace"
 
   private fun traceWake(message: String, toDebugPanel: Boolean = true) {
@@ -620,6 +621,12 @@ class NodeRuntime(
       }
     }
 
+    scope.launch {
+      prefs.wakeEngine.collect {
+        refreshHotwordServiceState()
+      }
+    }
+
     scope.launch(Dispatchers.Default) {
       gateways.collect { list ->
         seedLastDiscoveredGateway(list)
@@ -770,6 +777,12 @@ class NodeRuntime(
     refreshHotwordServiceState()
   }
 
+  fun setWakeEngine(engine: WakeEngine) {
+    traceWake("切换唤醒引擎 -> ${engine.rawValue}")
+    prefs.setWakeEngine(engine)
+    refreshHotwordServiceState()
+  }
+
   fun triggerHotwordWakeTest(): String {
     if (!hasRecordAudioPermission()) {
       traceWake("手动测试失败：缺少 RECORD_AUDIO 权限")
@@ -801,6 +814,14 @@ class NodeRuntime(
     refreshHotwordServiceState()
   }
 
+  private fun computeHotwordSessionKey(): String {
+    return listOf(
+      prefs.voiceWakeMode.value.rawValue,
+      prefs.wakeEngine.value.rawValue,
+      prefs.wakeWords.value.joinToString("\u0001"),
+    ).joinToString("|")
+  }
+
   private fun refreshHotwordServiceState() {
     val mode = prefs.voiceWakeMode.value
     val micBusy = prefs.talkEnabled.value
@@ -811,27 +832,45 @@ class NodeRuntime(
         VoiceWakeMode.Foreground -> _isForeground.value && !micBusy
         VoiceWakeMode.Always -> !micBusy
       } && hasAudioPermission
+    val sessionKey = computeHotwordSessionKey()
 
     traceWake(
-      "评估热词服务: mode=${mode.rawValue}, foreground=${_isForeground.value}, micBusy=$micBusy, hasRecordAudio=$hasAudioPermission, shouldRun=$shouldRun, running=$hotwordRunning",
+      "评估热词服务: mode=${mode.rawValue}, engine=${prefs.wakeEngine.value.rawValue}, foreground=${_isForeground.value}, micBusy=$micBusy, hasRecordAudio=$hasAudioPermission, shouldRun=$shouldRun, running=$hotwordRunning",
       toDebugPanel = false,
     )
 
-    if (shouldRun == hotwordRunning) {
-      traceWake("热词服务状态不变，跳过切换", toDebugPanel = false)
-      return
-    }
-    if (shouldRun) {
-      hotwordRunning = HotwordService.start(appContext, prefs.wakeWords.value)
-      traceWake("请求启动 HotwordService，结果=$hotwordRunning")
+    if (!shouldRun) {
+      lastHotwordSessionKey = null
       if (!hotwordRunning) {
-        prefs.setVoiceWakeMode(VoiceWakeMode.Off)
-        traceWake("HotwordService 启动失败，自动回退到 off")
+        traceWake("热词服务应保持停止", toDebugPanel = false)
+        return
       }
-    } else {
       traceWake("请求停止 HotwordService")
       HotwordService.stop(appContext)
       hotwordRunning = false
+      return
+    }
+
+    if (hotwordRunning && lastHotwordSessionKey == sessionKey) {
+      traceWake("热词配置未变，跳过重启", toDebugPanel = false)
+      return
+    }
+
+    if (hotwordRunning) {
+      traceWake("热词配置已变，先停止再启动以加载新引擎或唤醒词", toDebugPanel = false)
+      HotwordService.stop(appContext)
+      hotwordRunning = false
+    }
+
+    hotwordRunning =
+      HotwordService.start(appContext, prefs.wakeWords.value, prefs.wakeEngine.value)
+    traceWake("请求启动 HotwordService，结果=$hotwordRunning")
+    if (hotwordRunning) {
+      lastHotwordSessionKey = sessionKey
+    } else {
+      lastHotwordSessionKey = null
+      prefs.setVoiceWakeMode(VoiceWakeMode.Off)
+      traceWake("HotwordService 启动失败，自动回退到 off")
     }
   }
 

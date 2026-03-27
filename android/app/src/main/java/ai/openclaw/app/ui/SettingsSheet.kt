@@ -13,6 +13,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -37,10 +38,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
@@ -70,8 +76,12 @@ import ai.openclaw.app.BuildConfig
 import ai.openclaw.app.LocationMode
 import ai.openclaw.app.MainViewModel
 import ai.openclaw.app.VoiceWakeMode
+import ai.openclaw.app.WakeEngine
+import ai.openclaw.app.WakeWords
 import ai.openclaw.app.node.DeviceNotificationListenerService
+import ai.openclaw.app.voice.SherpaKwsKeywords
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsSheet(viewModel: MainViewModel) {
   val context = LocalContext.current
@@ -84,13 +94,33 @@ fun SettingsSheet(viewModel: MainViewModel) {
   val preventSleep by viewModel.preventSleep.collectAsState()
   val canvasDebugStatusEnabled by viewModel.canvasDebugStatusEnabled.collectAsState()
   val voiceWakeMode by viewModel.voiceWakeMode.collectAsState()
+  val wakeEngine by viewModel.wakeEngine.collectAsState()
   val wakeWords by viewModel.wakeWords.collectAsState()
   val hotwordDebugLogs by viewModel.hotwordDebugLogs.collectAsState()
-  var wakeWordsDraft by remember(wakeWords) { mutableStateOf(wakeWords.joinToString(", ")) }
   var hotwordTestStatus by remember { mutableStateOf<String?>(null) }
+  var wakeWordMenuExpanded by remember { mutableStateOf(false) }
+  val sherpaWakeWordLabels =
+    remember(context) {
+      runCatching { SherpaKwsKeywords.displayLabelsOrdered(context.assets) }.getOrElse { emptyList() }
+    }
+  val wakeWordOptions =
+    remember(wakeEngine, sherpaWakeWordLabels) {
+      when (wakeEngine) {
+        WakeEngine.Vosk -> WakeWords.voskWakeWordMenuOptions
+        WakeEngine.SherpaOnnx -> sherpaWakeWordLabels
+      }
+    }
 
   LaunchedEffect(voiceWakeMode) {
     hotwordTestStatus = null
+  }
+
+  LaunchedEffect(wakeWords, wakeWordOptions) {
+    val primary = wakeWords.firstOrNull().orEmpty()
+    if (wakeWordOptions.isEmpty()) return@LaunchedEffect
+    if (primary.isEmpty() || primary !in wakeWordOptions) {
+      viewModel.setWakeWords(listOf(wakeWordOptions.first()))
+    }
   }
 
   val listState = rememberLazyListState()
@@ -443,13 +473,17 @@ fun SettingsSheet(viewModel: MainViewModel) {
             if (hotwordDebugLogs.isEmpty()) {
               Text("暂无日志", style = mobileCallout, color = mobileTextTertiary)
             } else {
-              hotwordDebugLogs.takeLast(20).forEach { line ->
-                Text(
-                  line,
-                  style = mobileCaption1.copy(fontFamily = FontFamily.Monospace),
-                  color = mobileTextSecondary,
-                  modifier = Modifier.padding(vertical = 2.dp),
-                )
+              SelectionContainer {
+                Column {
+                  hotwordDebugLogs.takeLast(20).forEach { line ->
+                    Text(
+                      line,
+                      style = mobileCaption1.copy(fontFamily = FontFamily.Monospace),
+                      color = mobileTextSecondary,
+                      modifier = Modifier.padding(vertical = 2.dp),
+                    )
+                  }
+                }
               }
             }
           }
@@ -554,41 +588,91 @@ fun SettingsSheet(viewModel: MainViewModel) {
             },
           )
           HorizontalDivider(color = mobileBorder)
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = { Text("唤醒引擎：Vosk", style = mobileHeadline) },
+            supportingContent = {
+              Text(
+                "小型英文模型：下方唤醒词仅提供可命中的英文词（如 openclaw），勿与 Sherpa 中文词混用。",
+                style = mobileCallout,
+              )
+            },
+            trailingContent = {
+              RadioButton(
+                selected = wakeEngine == WakeEngine.Vosk,
+                onClick = { viewModel.setWakeEngine(WakeEngine.Vosk) },
+              )
+            },
+          )
+          HorizontalDivider(color = mobileBorder)
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = { Text("唤醒引擎：Sherpa-ONNX", style = mobileHeadline) },
+            supportingContent = {
+              Text(
+                "中文 KWS（WeNetSpeech）：唤醒词须与 APK 内 keywords.txt 中 @ 后面的词一致，或使用该文件中已有示例；自定义词需按官方文档用 text2token 生成音素行。",
+                style = mobileCallout,
+              )
+            },
+            trailingContent = {
+              RadioButton(
+                selected = wakeEngine == WakeEngine.SherpaOnnx,
+                onClick = { viewModel.setWakeEngine(WakeEngine.SherpaOnnx) },
+              )
+            },
+          )
+          HorizontalDivider(color = mobileBorder)
           Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-            OutlinedTextField(
-              value = wakeWordsDraft,
-              onValueChange = { wakeWordsDraft = it },
-              label = { Text("唤醒词（逗号分隔）", style = mobileCaption1, color = mobileTextSecondary) },
-              modifier = Modifier.fillMaxWidth(),
-              textStyle = mobileBody.copy(color = mobileText),
-              colors = settingsTextFieldColors(),
-              singleLine = true,
-            )
+            val displayWakeWord =
+              wakeWords.firstOrNull().takeIf { it in wakeWordOptions }.orEmpty()
+                .ifEmpty { wakeWordOptions.firstOrNull().orEmpty() }
+            ExposedDropdownMenuBox(
+              expanded = wakeWordMenuExpanded,
+              onExpandedChange = { wakeWordMenuExpanded = it },
+            ) {
+              OutlinedTextField(
+                value = displayWakeWord,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("唤醒词", style = mobileCaption1, color = mobileTextSecondary) },
+                modifier =
+                  Modifier
+                    .menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = true)
+                    .fillMaxWidth(),
+                textStyle = mobileBody.copy(color = mobileText),
+                colors = settingsTextFieldColors(),
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = wakeWordMenuExpanded) },
+                singleLine = true,
+              )
+              DropdownMenu(
+                expanded = wakeWordMenuExpanded,
+                onDismissRequest = { wakeWordMenuExpanded = false },
+              ) {
+                wakeWordOptions.forEach { label ->
+                  DropdownMenuItem(
+                    text = { Text(label, style = mobileBody.copy(color = mobileText)) },
+                    onClick = {
+                      wakeWordMenuExpanded = false
+                      if (label != displayWakeWord) {
+                        viewModel.setWakeWords(listOf(label))
+                      }
+                    },
+                  )
+                }
+              }
+            }
             Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              Button(
-                onClick = {
-                  val parsed =
-                    wakeWordsDraft
-                      .split(',')
-                      .map { it.trim() }
-                      .filter { it.isNotEmpty() }
-                  viewModel.setWakeWords(parsed)
-                },
-                colors = settingsPrimaryButtonColors(),
-                shape = RoundedCornerShape(12.dp),
-              ) {
-                Text("保存", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
-              }
-              Button(
-                onClick = {
-                  hotwordTestStatus = viewModel.triggerHotwordWakeTest()
-                },
-                colors = settingsPrimaryButtonColors(),
-                shape = RoundedCornerShape(12.dp),
-              ) {
-                Text("测试唤醒", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
-              }
+            Button(
+              onClick = {
+                hotwordTestStatus = viewModel.triggerHotwordWakeTest()
+              },
+              modifier = Modifier.fillMaxWidth(),
+              colors = settingsPrimaryButtonColors(),
+              shape = RoundedCornerShape(12.dp),
+            ) {
+              Text("测试唤醒", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
             }
             Spacer(modifier = Modifier.height(6.dp))
             Text(

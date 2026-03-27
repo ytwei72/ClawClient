@@ -2,7 +2,7 @@
 
 ## 唤醒模型双引擎（Vosk + Sherpa-ONNX）
 
-- [ ] **在保留现有 Vosk 唤醒的基础上，增加 Sherpa-ONNX（KWS）作为第二套唤醒引擎**；用户在 App 内**二选一**作为当前使用的唤醒模型；**Release/Debug 构建将 Vosk 与 Sherpa 所需的 native 库、ONNX 模型、词表等资源一并打入 APK**（不设「仅下发其中一套」的裁剪目标，以体积换可切换与离线可用）。
+- [x] **在保留现有 Vosk 唤醒的基础上，增加 Sherpa-ONNX（KWS）作为第二套唤醒引擎**；用户在 App 内**二选一**作为当前使用的唤醒模型；**Release/Debug 构建将 Vosk 与 Sherpa 所需的 native 库、ONNX 模型、词表等资源一并打入 APK**（不设「仅下发其中一套」的裁剪目标，以体积换可切换与离线可用）。
   - **运行时契约不变：** 仍通过 `HotwordService` / `WAKE_TRIGGERED` / `NodeRuntime` 的启停与麦克风协作；实现上可按所选引擎分支初始化（或抽象统一接口），切换引擎时需重新装载模型并重启热词服务。
   - **设置与持久化：** 增加「唤醒引擎」选项（例如 Vosk / Sherpa-ONNX），写入 `SecurePrefs`（或等价存储），变更后触发 `refreshHotwordServiceState()` 一类逻辑以应用新引擎。
   - **本机参考工程（Sherpa 应对照 Kws，而非 ASR 示例）：** `E:\OpenSource\AI\sherpa-onnx\android\SherpaOnnxKws`  

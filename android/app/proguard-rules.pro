@@ -6,3 +6,5 @@
 -dontwarn lombok.Generated
 -dontwarn org.slf4j.impl.StaticLoggerBinder
 -dontwarn sun.net.spi.nameservice.NameServiceDescriptor
+
+-keep class com.k2fsa.sherpa.onnx.** { *; }

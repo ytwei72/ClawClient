@@ -87,6 +87,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val speakerEnabled: StateFlow<Boolean> = prefs.speakerEnabled
   val micEnabled: StateFlow<Boolean> = prefs.talkEnabled
   val voiceWakeMode: StateFlow<VoiceWakeMode> = prefs.voiceWakeMode
+  val wakeEngine: StateFlow<WakeEngine> = prefs.wakeEngine
   val wakeWords: StateFlow<List<String>> = prefs.wakeWords
   val hotwordDebugLogs: StateFlow<List<String>> = HotwordDebugLogger.logs
 
@@ -218,6 +219,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setVoiceWakeMode(mode: VoiceWakeMode) {
     ensureRuntime().setVoiceWakeMode(mode)
+  }
+
+  fun setWakeEngine(engine: WakeEngine) {
+    ensureRuntime().setWakeEngine(engine)
   }
 
   fun setWakeWords(words: List<String>) {

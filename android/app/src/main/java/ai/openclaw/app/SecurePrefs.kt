@@ -20,10 +20,11 @@ class SecurePrefs(
   private val securePrefsOverride: SharedPreferences? = null,
 ) {
   companion object {
-    val defaultWakeWords: List<String> = listOf("openclaw", "claude")
+    val defaultWakeWords: List<String> = WakeWords.voskWakeWordMenuOptions
     private const val displayNameKey = "node.displayName"
     private const val locationModeKey = "location.enabledMode"
     private const val voiceWakeModeKey = "voiceWake.mode"
+    private const val wakeEngineKey = "voiceWake.engine"
     private const val plainPrefsName = "openclaw.node"
     private const val securePrefsName = "openclaw.node.secure"
   }
@@ -101,6 +102,9 @@ class SecurePrefs(
 
   private val _voiceWakeMode = MutableStateFlow(loadVoiceWakeMode())
   val voiceWakeMode: StateFlow<VoiceWakeMode> = _voiceWakeMode
+
+  private val _wakeEngine = MutableStateFlow(loadWakeEngine())
+  val wakeEngine: StateFlow<WakeEngine> = _wakeEngine
 
   private val _talkEnabled = MutableStateFlow(plainPrefs.getBoolean("talk.enabled", false))
   val talkEnabled: StateFlow<Boolean> = _talkEnabled
@@ -298,6 +302,11 @@ class SecurePrefs(
     _voiceWakeMode.value = mode
   }
 
+  fun setWakeEngine(engine: WakeEngine) {
+    securePrefs.edit { putString(wakeEngineKey, engine.rawValue) }
+    _wakeEngine.value = engine
+  }
+
   fun setTalkEnabled(value: Boolean) {
     plainPrefs.edit { putBoolean("talk.enabled", value) }
     _talkEnabled.value = value
@@ -306,6 +315,21 @@ class SecurePrefs(
   fun setSpeakerEnabled(value: Boolean) {
     plainPrefs.edit { putBoolean("voice.speakerEnabled", value) }
     _speakerEnabled.value = value
+  }
+
+  private fun loadWakeEngine(): WakeEngine {
+    val fromSecure = securePrefs.getString(wakeEngineKey, null)?.trim().orEmpty()
+    if (fromSecure.isNotEmpty()) {
+      return WakeEngine.fromRawValue(fromSecure)
+    }
+    val legacy = plainPrefs.getString(wakeEngineKey, null)?.trim().orEmpty()
+    if (legacy.isNotEmpty()) {
+      val engine = WakeEngine.fromRawValue(legacy)
+      securePrefs.edit { putString(wakeEngineKey, engine.rawValue) }
+      plainPrefs.edit { remove(wakeEngineKey) }
+      return engine
+    }
+    return WakeEngine.default
   }
 
   private fun loadVoiceWakeMode(): VoiceWakeMode {
