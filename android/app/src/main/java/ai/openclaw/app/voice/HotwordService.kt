@@ -84,9 +84,12 @@ class HotwordService : Service(), RecognitionListener {
   private var wakeWords: List<String> = emptyList()
   private var isDestroyed = false
   private val hotwordPrefs by lazy { getSharedPreferences("hotword_prefs", Context.MODE_PRIVATE) }
+  private val wakeTraceTag = "WakeTrace"
+  private var lastHeardTextTraceAt = 0L
 
   private fun debugLog(message: String) {
     HotwordDebugLogger.log(message)
+    Log.i(wakeTraceTag, "HotwordService: $message")
   }
 
   override fun onCreate() {
@@ -95,6 +98,7 @@ class HotwordService : Service(), RecognitionListener {
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    debugLog("onStartCommand 收到启动请求")
     if (
       ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
       PackageManager.PERMISSION_GRANTED
@@ -211,6 +215,7 @@ class HotwordService : Service(), RecognitionListener {
       debugLog("开始热词识别")
       val recognizer = Recognizer(model, sampleRate, jsonWords)
       speechService = SpeechService(recognizer, sampleRate).also { it.startListening(this) }
+      debugLog("识别器已启动，进入监听")
     } catch (t: Throwable) {
       val reason = t.message?.trim().orEmpty()
       val suffix = if (reason.isEmpty()) "" else ": $reason"
@@ -341,9 +346,28 @@ class HotwordService : Service(), RecognitionListener {
         ""
       }.trim()
     if (text.isEmpty()) return
-    if (wakeWords.none { word -> text.contains(word, ignoreCase = true) }) return
+
+    val now = System.currentTimeMillis()
+    if (now - lastHeardTextTraceAt >= 1200L) {
+      lastHeardTextTraceAt = now
+      debugLog("识别文本: \"$text\"")
+    }
+
+    val normalizedText = normalizeForWakeMatch(text)
+    val compactText = normalizedText.replace(" ", "")
+    val matched =
+      wakeWords.any { rawWord ->
+        val normalizedWord = normalizeForWakeMatch(rawWord)
+        normalizedWord.isNotEmpty() &&
+          (
+            normalizedText.contains(normalizedWord) ||
+              compactText.contains(normalizedWord.replace(" ", ""))
+            )
+      }
+    if (!matched) return
 
     debugLog("命中唤醒词: $text")
+    debugLog("发送 WAKE_TRIGGERED 广播")
     sendBroadcast(Intent(actionWakeTriggered).setPackage(packageName))
     try {
       val launchIntent =
@@ -367,6 +391,12 @@ class HotwordService : Service(), RecognitionListener {
   }
 
   override fun onPartialResult(hypothesis: String?) {}
+
+  private fun normalizeForWakeMatch(value: String): String {
+    val lowered = value.lowercase()
+    val replaced = lowered.replace(Regex("[^a-z0-9\\s]"), " ")
+    return replaced.replace(Regex("\\s+"), " ").trim()
+  }
 
   override fun onError(exception: Exception?) {
     debugLog("识别错误: ${exception?.message ?: "unknown"}")

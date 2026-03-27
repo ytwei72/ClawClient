@@ -65,6 +65,14 @@ class NodeRuntime(
 
   private val externalAudioCaptureActive = MutableStateFlow(false)
   private var hotwordRunning = false
+  private val wakeTraceTag = "WakeTrace"
+
+  private fun traceWake(message: String, toDebugPanel: Boolean = true) {
+    Log.i(wakeTraceTag, message)
+    if (toDebugPanel) {
+      HotwordDebugLogger.log(message)
+    }
+  }
 
   private val discovery = GatewayDiscovery(appContext, scope = scope)
   val gateways: StateFlow<List<GatewayEndpoint>> = discovery.gateways
@@ -382,6 +390,7 @@ class NodeRuntime(
     object : BroadcastReceiver() {
       override fun onReceive(context: Context?, intent: Intent?) {
         if (intent?.action != HotwordService.actionWakeTriggered) return
+        traceWake("收到 WAKE_TRIGGERED 广播，准备打开麦克风")
         setMicEnabled(true)
       }
     }
@@ -736,6 +745,7 @@ class NodeRuntime(
   }
 
   fun setMicEnabled(value: Boolean) {
+    traceWake("setMicEnabled(value=$value)")
     prefs.setTalkEnabled(value)
     if (value) {
       // Tapping mic on interrupts any active TTS (barge-in)
@@ -749,21 +759,23 @@ class NodeRuntime(
   }
 
   fun setVoiceWakeMode(mode: VoiceWakeMode) {
+    traceWake("切换语音唤醒模式 -> ${mode.rawValue}")
     prefs.setVoiceWakeMode(mode)
     refreshHotwordServiceState()
   }
 
   fun setWakeWords(words: List<String>) {
     prefs.setWakeWords(words)
+    traceWake("更新唤醒词 -> ${prefs.wakeWords.value.joinToString()}")
     refreshHotwordServiceState()
   }
 
   fun triggerHotwordWakeTest(): String {
     if (!hasRecordAudioPermission()) {
-      HotwordDebugLogger.log("手动测试失败：缺少 RECORD_AUDIO 权限")
+      traceWake("手动测试失败：缺少 RECORD_AUDIO 权限")
       return "测试失败：麦克风权限未授权"
     }
-    HotwordDebugLogger.log("手动测试：模拟命中唤醒词")
+    traceWake("手动测试：模拟命中唤醒词")
     appContext.sendBroadcast(Intent(HotwordService.actionWakeTriggered).setPackage(appContext.packageName))
     return "测试已触发：已发送唤醒事件"
   }
@@ -792,20 +804,32 @@ class NodeRuntime(
   private fun refreshHotwordServiceState() {
     val mode = prefs.voiceWakeMode.value
     val micBusy = prefs.talkEnabled.value
+    val hasAudioPermission = hasRecordAudioPermission()
     val shouldRun =
       when (mode) {
         VoiceWakeMode.Off -> false
         VoiceWakeMode.Foreground -> _isForeground.value && !micBusy
         VoiceWakeMode.Always -> !micBusy
-      } && hasRecordAudioPermission()
+      } && hasAudioPermission
 
-    if (shouldRun == hotwordRunning) return
+    traceWake(
+      "评估热词服务: mode=${mode.rawValue}, foreground=${_isForeground.value}, micBusy=$micBusy, hasRecordAudio=$hasAudioPermission, shouldRun=$shouldRun, running=$hotwordRunning",
+      toDebugPanel = false,
+    )
+
+    if (shouldRun == hotwordRunning) {
+      traceWake("热词服务状态不变，跳过切换", toDebugPanel = false)
+      return
+    }
     if (shouldRun) {
       hotwordRunning = HotwordService.start(appContext, prefs.wakeWords.value)
+      traceWake("请求启动 HotwordService，结果=$hotwordRunning")
       if (!hotwordRunning) {
         prefs.setVoiceWakeMode(VoiceWakeMode.Off)
+        traceWake("HotwordService 启动失败，自动回退到 off")
       }
     } else {
+      traceWake("请求停止 HotwordService")
       HotwordService.stop(appContext)
       hotwordRunning = false
     }
