@@ -25,6 +25,30 @@
   "models": {
     "mode": "merge",
     "providers": {
+      "volcengine": {
+        "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+        "apiKey": "4ff38093-6d60-470d-8d56-2cfa425725a2",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "name": "Doubao Seed 2.0 Code Preview",
+            "api": "openai-completions",
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          }
+        ]
+      },
       "volcengine-coding-plan": {
         "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
         "apiKey": "4ff38093-6d60-470d-8d56-2cfa425725a2",
@@ -122,10 +146,10 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "volcengine-coding-plan/MiniMax-M2.5"
+        "primary": "volcengine/doubao-seed-2-0-code-preview-260215"
       },
       "models": {
-        "volcengine-coding-plan/MiniMax-M2.5": {}
+        "volcengine/doubao-seed-2-0-code-preview-260215": {}
       },
       "workspace": "/root/.openclaw/workspace",
       "compaction": {
