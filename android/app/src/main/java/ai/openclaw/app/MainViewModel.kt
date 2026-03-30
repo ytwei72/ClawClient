@@ -9,6 +9,7 @@ import ai.openclaw.app.chat.ChatMessage
 import ai.openclaw.app.chat.ChatPendingToolCall
 import ai.openclaw.app.chat.ChatSessionEntry
 import ai.openclaw.app.chat.OutgoingAttachment
+import ai.openclaw.app.gateway.DeviceIdentityStore
 import ai.openclaw.app.gateway.GatewayEndpoint
 import ai.openclaw.app.node.CameraCaptureManager
 import ai.openclaw.app.node.CanvasController
@@ -70,6 +71,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   val cameraHud: StateFlow<CameraHudState?> = runtimeState(initial = null) { it.cameraHud }
   val cameraFlashToken: StateFlow<Long> = runtimeState(initial = 0L) { it.cameraFlashToken }
+
+  val pairingDeviceId: StateFlow<String> =
+    runtimeState(
+      initial = DeviceIdentityStore(getApplication()).loadOrCreate().deviceId,
+    ) {
+      it.pairingDeviceId
+    }
 
   val instanceId: StateFlow<String> = prefs.instanceId
   val displayName: StateFlow<String> = prefs.displayName
@@ -200,6 +208,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
     prefs.setOnboardingCompleted(value)
   }
+
+  /** After finishing onboarding once, re-opening the wizard must not wipe gateway device identity. */
+  fun hasCompletedOnboardingAtLeastOnce(): Boolean = prefs.hasCompletedOnboardingAtLeastOnce()
 
   fun setCanvasDebugStatusEnabled(value: Boolean) {
     prefs.setCanvasDebugStatusEnabled(value)

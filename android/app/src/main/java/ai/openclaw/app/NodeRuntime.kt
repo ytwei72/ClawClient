@@ -80,6 +80,8 @@ class NodeRuntime(
   val discoveryStatusText: StateFlow<String> = discovery.statusText
 
   private val identityStore = DeviceIdentityStore(appContext)
+  private val _pairingDeviceId = MutableStateFlow(identityStore.loadOrCreate().deviceId)
+  val pairingDeviceId: StateFlow<String> = _pairingDeviceId
   private var connectedEndpoint: GatewayEndpoint? = null
 
   private val cameraHandler: CameraHandler = CameraHandler(
@@ -887,6 +889,7 @@ class NodeRuntime(
     }
     identityStore.clearStoredIdentity()
     disconnect()
+    _pairingDeviceId.value = identityStore.loadOrCreate().deviceId
   }
 
   fun refreshGatewayConnection() {

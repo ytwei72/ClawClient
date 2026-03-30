@@ -12,7 +12,6 @@ import android.provider.Settings
 import androidx.compose.foundation.BorderStroke
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -20,7 +19,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -62,8 +60,6 @@ import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Tune
@@ -81,6 +77,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -98,9 +95,6 @@ import ai.openclaw.app.BuildConfig
 import ai.openclaw.app.LocationMode
 import ai.openclaw.app.MainViewModel
 import ai.openclaw.app.node.DeviceNotificationListenerService
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 
 private const val ONBOARDING_MANUAL_HOST_DEFAULT = "100.118.60.120"
 private const val ONBOARDING_MANUAL_PORT_DEFAULT = "16232"
@@ -110,11 +104,6 @@ private enum class OnboardingStep(val index: Int, val label: String) {
   Gateway(2, "Gateway"),
   Permissions(3, "权限"),
   FinalCheck(4, "连接"),
-}
-
-private enum class GatewayInputMode {
-  SetupCode,
-  Manual,
 }
 
 private enum class PermissionToggle {
@@ -217,38 +206,33 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
   val isConnected by viewModel.isConnected.collectAsState()
   val serverName by viewModel.serverName.collectAsState()
   val remoteAddress by viewModel.remoteAddress.collectAsState()
-  val persistedGatewayToken by viewModel.gatewayToken.collectAsState()
   val pendingTrust by viewModel.pendingGatewayTrust.collectAsState()
 
   var step by rememberSaveable { mutableStateOf(OnboardingStep.Welcome) }
-  var setupCode by rememberSaveable { mutableStateOf("") }
   var gatewayUrl by rememberSaveable { mutableStateOf("") }
   var gatewayPassword by rememberSaveable { mutableStateOf("") }
-  var gatewayInputMode by rememberSaveable { mutableStateOf(GatewayInputMode.SetupCode) }
-  var gatewayAdvancedOpen by rememberSaveable { mutableStateOf(false) }
   var manualHost by rememberSaveable { mutableStateOf(ONBOARDING_MANUAL_HOST_DEFAULT) }
   var manualPort by rememberSaveable { mutableStateOf(ONBOARDING_MANUAL_PORT_DEFAULT) }
   var manualTls by rememberSaveable { mutableStateOf(false) }
-  /** Manual 模式令牌仅存在草稿；连接前不写入 prefs。留空时仅靠新设备密钥，便于 OpenClaw 出现「待批准」。 */
-  var manualGatewayTokenDraft by rememberSaveable { mutableStateOf("") }
+  /** 引导完成并连接前仅保存在草稿。 */
+  var manualGatewayTokenDraft by rememberSaveable { mutableStateOf(DEFAULT_MANUAL_CONNECT_GATEWAY_TOKEN) }
   var gatewayError by rememberSaveable { mutableStateOf<String?>(null) }
   var attemptedConnect by rememberSaveable { mutableStateOf(false) }
 
   val lifecycleOwner = LocalLifecycleOwner.current
-  val qrScannerOptions =
-    remember {
-      GmsBarcodeScannerOptions.Builder()
-        .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-        .build()
-    }
-  val qrScanner = remember(context, qrScannerOptions) { GmsBarcodeScanning.getClient(context, qrScannerOptions) }
 
   var didClearDeviceIdentityForOnboarding by rememberSaveable { mutableStateOf(false) }
   LaunchedEffect(Unit) {
     if (didClearDeviceIdentityForOnboarding) return@LaunchedEffect
+    // Only the true first-run flow may wipe identity. Re-launching the wizard after completion uses
+    // rememberSaveable reset + this effect again; skipping clear keeps the same device_id for Gateway.
+    if (viewModel.hasCompletedOnboardingAtLeastOnce()) {
+      didClearDeviceIdentityForOnboarding = true
+      return@LaunchedEffect
+    }
     viewModel.clearDeviceIdentityForOnboardingEntry()
     didClearDeviceIdentityForOnboarding = true
-    manualGatewayTokenDraft = ""
+    manualGatewayTokenDraft = DEFAULT_MANUAL_CONNECT_GATEWAY_TOKEN
   }
 
   val smsAvailable =
@@ -560,49 +544,12 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
           OnboardingStep.Welcome -> WelcomeStep()
           OnboardingStep.Gateway ->
             GatewayStep(
-              inputMode = gatewayInputMode,
-              advancedOpen = gatewayAdvancedOpen,
-              setupCode = setupCode,
               manualHost = manualHost,
               manualPort = manualPort,
               manualTls = manualTls,
               gatewayToken = manualGatewayTokenDraft,
               gatewayPassword = gatewayPassword,
               gatewayError = gatewayError,
-              onScanQrClick = {
-                gatewayError = null
-                qrScanner.startScan()
-                  .addOnSuccessListener { barcode ->
-                    val contents = barcode.rawValue?.trim().orEmpty()
-                    if (contents.isEmpty()) {
-                      return@addOnSuccessListener
-                    }
-                    val scannedSetupCode = resolveScannedSetupCode(contents)
-                    if (scannedSetupCode == null) {
-                      gatewayError = "二维码中未包含有效的安装码。"
-                      return@addOnSuccessListener
-                    }
-                    setupCode = scannedSetupCode
-                    gatewayInputMode = GatewayInputMode.SetupCode
-                    gatewayError = null
-                    attemptedConnect = false
-                  }
-                  .addOnCanceledListener {
-                    // User dismissed the scanner; preserve current form state.
-                  }
-                  .addOnFailureListener {
-                    gatewayError = qrScannerErrorMessage()
-                  }
-              },
-              onAdvancedOpenChange = { gatewayAdvancedOpen = it },
-              onInputModeChange = {
-                gatewayInputMode = it
-                gatewayError = null
-              },
-              onSetupCodeChange = {
-                setupCode = it
-                gatewayError = null
-              },
               onManualHostChange = {
                 manualHost = it
                 gatewayError = null
@@ -754,7 +701,7 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
               remoteAddress = remoteAddress,
               attemptedConnect = attemptedConnect,
               enabledPermissions = enabledPermissionSummary,
-              methodLabel = if (gatewayInputMode == GatewayInputMode.SetupCode) "二维码 / 安装码" else "手动",
+              methodLabel = "手动",
             )
         }
       }
@@ -807,40 +754,14 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
           OnboardingStep.Gateway -> {
             Button(
               onClick = {
-                if (gatewayInputMode == GatewayInputMode.SetupCode) {
-                  val parsedSetup = decodeGatewaySetupCode(setupCode)
-                  if (parsedSetup == null) {
-                    gatewayError = "请先扫码，或使用高级设置。"
-                    return@Button
-                  }
-                  val parsedGateway = parseGatewayEndpoint(parsedSetup.url)
-                  if (parsedGateway == null) {
-                    gatewayError = "安装码中的 Gateway 地址无效。"
-                    return@Button
-                  }
-                  gatewayUrl = parsedSetup.url
-                  viewModel.setGatewayBootstrapToken(parsedSetup.bootstrapToken.orEmpty())
-                  val sharedToken = parsedSetup.token.orEmpty().trim()
-                  val password = parsedSetup.password.orEmpty().trim()
-                  if (sharedToken.isNotEmpty()) {
-                    viewModel.setGatewayToken(sharedToken)
-                  } else if (!parsedSetup.bootstrapToken.isNullOrBlank()) {
-                    viewModel.setGatewayToken("")
-                  }
-                  gatewayPassword = password
-                  if (password.isEmpty() && !parsedSetup.bootstrapToken.isNullOrBlank()) {
-                    viewModel.setGatewayPassword("")
-                  }
-                } else {
-                  val manualUrl = composeGatewayManualUrl(manualHost, manualPort, manualTls)
-                  val parsedGateway = manualUrl?.let(::parseGatewayEndpoint)
-                  if (parsedGateway == null) {
-                    gatewayError = "手动填写的端点无效。"
-                    return@Button
-                  }
-                  gatewayUrl = parsedGateway.displayUrl
-                  viewModel.setGatewayBootstrapToken("")
+                val manualUrl = composeGatewayManualUrl(manualHost, manualPort, manualTls)
+                val parsedGateway = manualUrl?.let(::parseGatewayEndpoint)
+                if (parsedGateway == null) {
+                  gatewayError = "请填写有效的主机与端口。"
+                  return@Button
                 }
+                gatewayUrl = parsedGateway.displayUrl
+                viewModel.setGatewayBootstrapToken("")
                 step = OnboardingStep.Permissions
               },
               modifier = Modifier.weight(1f).height(52.dp),
@@ -883,21 +804,14 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                     gatewayError = "无效的 Gateway 地址。"
                     return@Button
                   }
-                  val token =
-                    if (gatewayInputMode == GatewayInputMode.Manual) {
-                      manualGatewayTokenDraft.trim()
-                    } else {
-                      persistedGatewayToken.trim()
-                    }
+                  val token = manualGatewayTokenDraft.trim()
                   val password = gatewayPassword.trim()
                   attemptedConnect = true
                   viewModel.setManualEnabled(true)
                   viewModel.setManualHost(parsed.host)
                   viewModel.setManualPort(parsed.port)
                   viewModel.setManualTls(parsed.tls)
-                  if (gatewayInputMode == GatewayInputMode.Manual) {
-                    viewModel.setGatewayBootstrapToken("")
-                  }
+                  viewModel.setGatewayBootstrapToken("")
                   if (token.isNotEmpty()) {
                     viewModel.setGatewayToken(token)
                   } else {
@@ -995,7 +909,7 @@ private fun WelcomeStep() {
     FeatureCard(
       icon = Icons.Default.Wifi,
       title = "连接到你的 Gateway",
-      subtitle = "扫描二维码或手动填写主机",
+      subtitle = "填写 Gateway 主机与端口",
       accentColor = onboardingAccent,
     )
     FeatureCard(
@@ -1021,186 +935,102 @@ private fun WelcomeStep() {
 
 @Composable
 private fun GatewayStep(
-  inputMode: GatewayInputMode,
-  advancedOpen: Boolean,
-  setupCode: String,
   manualHost: String,
   manualPort: String,
   manualTls: Boolean,
   gatewayToken: String,
   gatewayPassword: String,
   gatewayError: String?,
-  onScanQrClick: () -> Unit,
-  onAdvancedOpenChange: (Boolean) -> Unit,
-  onInputModeChange: (GatewayInputMode) -> Unit,
-  onSetupCodeChange: (String) -> Unit,
   onManualHostChange: (String) -> Unit,
   onManualPortChange: (String) -> Unit,
   onManualTlsChange: (Boolean) -> Unit,
   onTokenChange: (String) -> Unit,
   onPasswordChange: (String) -> Unit,
 ) {
-  val resolvedEndpoint = remember(setupCode) { decodeGatewaySetupCode(setupCode)?.url?.let { parseGatewayEndpoint(it)?.displayUrl } }
   val manualResolvedEndpoint = remember(manualHost, manualPort, manualTls) { composeGatewayManualUrl(manualHost, manualPort, manualTls)?.let { parseGatewayEndpoint(it)?.displayUrl } }
 
   StepShell(title = "Gateway 连接") {
     Text(
-      "在 Gateway 主机运行 `openclaw qr`，然后使用本机扫描。",
+      "请填写本机可访问的 Gateway 地址（主机、端口），与连接页手动连接方式一致。",
       style = onboardingCalloutStyle,
       color = onboardingTextSecondary,
     )
-    CommandBlock("openclaw qr")
-    Button(
-      onClick = onScanQrClick,
-      modifier = Modifier.fillMaxWidth().height(48.dp),
-      shape = RoundedCornerShape(12.dp),
-      colors = onboardingPrimaryButtonColors(),
-    ) {
-      Text("扫描二维码", style = onboardingHeadlineStyle.copy(fontWeight = FontWeight.Bold))
-    }
-    if (!resolvedEndpoint.isNullOrBlank()) {
-      Text("已识别二维码，请核对下方端点。", style = onboardingCalloutStyle, color = onboardingSuccess)
-      ResolvedEndpoint(endpoint = resolvedEndpoint)
-    }
 
-    Surface(
+    Text("主机", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
+    OutlinedTextField(
+      value = manualHost,
+      onValueChange = onManualHostChange,
+      placeholder = { Text(ONBOARDING_MANUAL_HOST_DEFAULT, color = onboardingTextTertiary, style = onboardingBodyStyle) },
       modifier = Modifier.fillMaxWidth(),
-      shape = RoundedCornerShape(12.dp),
-      color = onboardingSurface,
-      border = androidx.compose.foundation.BorderStroke(1.dp, onboardingBorderStrong),
-      onClick = { onAdvancedOpenChange(!advancedOpen) },
+      singleLine = true,
+      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+      textStyle = onboardingBodyStyle.copy(color = onboardingText),
+      shape = RoundedCornerShape(14.dp),
+      colors = onboardingTextFieldColors(),
+    )
+
+    Text("端口", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
+    OutlinedTextField(
+      value = manualPort,
+      onValueChange = onManualPortChange,
+      placeholder = { Text(ONBOARDING_MANUAL_PORT_DEFAULT, color = onboardingTextTertiary, style = onboardingBodyStyle) },
+      modifier = Modifier.fillMaxWidth(),
+      singleLine = true,
+      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+      textStyle = onboardingBodyStyle.copy(fontFamily = FontFamily.Monospace, color = onboardingText),
+      shape = RoundedCornerShape(14.dp),
+      colors = onboardingTextFieldColors(),
+    )
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-      Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-      ) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-          Text("高级设置", style = onboardingHeadlineStyle, color = onboardingText)
-          Text("粘贴安装码或手动填写主机/端口。", style = onboardingCaption1Style, color = onboardingTextSecondary)
-        }
-        Icon(
-          imageVector = if (advancedOpen) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-          contentDescription = if (advancedOpen) "收起高级设置" else "展开高级设置",
-          tint = onboardingTextSecondary,
-        )
+      Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text("使用 TLS", style = onboardingHeadlineStyle, color = onboardingText)
+        Text("使用安全 WebSocket（`wss`）。", style = onboardingCalloutStyle.copy(lineHeight = 18.sp), color = onboardingTextSecondary)
       }
+      Switch(
+        checked = manualTls,
+        onCheckedChange = onManualTlsChange,
+        colors = onboardingSwitchColors(),
+      )
     }
 
-    AnimatedVisibility(visible = advancedOpen) {
-      Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        GatewayModeToggle(inputMode = inputMode, onInputModeChange = onInputModeChange)
+    Text("令牌（可选）", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
+    Text(
+      "已预填默认共享令牌，可按部署实际情况修改。",
+      style = onboardingCaption2Style,
+      color = onboardingTextTertiary,
+    )
+    OutlinedTextField(
+      value = gatewayToken,
+      onValueChange = onTokenChange,
+      placeholder = { Text("令牌", color = onboardingTextTertiary, style = onboardingBodyStyle) },
+      modifier = Modifier.fillMaxWidth(),
+      singleLine = true,
+      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+      textStyle = onboardingBodyStyle.copy(color = onboardingText),
+      shape = RoundedCornerShape(14.dp),
+      colors = onboardingTextFieldColors(),
+    )
 
-        if (inputMode == GatewayInputMode.SetupCode) {
-          Text("安装码", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
-          OutlinedTextField(
-            value = setupCode,
-            onValueChange = onSetupCodeChange,
-            placeholder = { Text("粘贴 `openclaw qr --setup-code-only` 的输出", color = onboardingTextTertiary, style = onboardingBodyStyle) },
-            modifier = Modifier.fillMaxWidth(),
-            minLines = 3,
-            maxLines = 5,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-            textStyle = onboardingBodyStyle.copy(fontFamily = FontFamily.Monospace, color = onboardingText),
-            shape = RoundedCornerShape(14.dp),
-            colors =
-              onboardingTextFieldColors(),
-          )
-          if (!resolvedEndpoint.isNullOrBlank()) {
-            ResolvedEndpoint(endpoint = resolvedEndpoint)
-          }
-        } else {
-          Text("主机", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
-          OutlinedTextField(
-            value = manualHost,
-            onValueChange = onManualHostChange,
-            placeholder = {
-              Text(ONBOARDING_MANUAL_HOST_DEFAULT, color = onboardingTextTertiary, style = onboardingBodyStyle)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            textStyle = onboardingBodyStyle.copy(color = onboardingText),
-            shape = RoundedCornerShape(14.dp),
-            colors =
-              onboardingTextFieldColors(),
-          )
+    Text("密码（可选）", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
+    OutlinedTextField(
+      value = gatewayPassword,
+      onValueChange = onPasswordChange,
+      placeholder = { Text("密码", color = onboardingTextTertiary, style = onboardingBodyStyle) },
+      modifier = Modifier.fillMaxWidth(),
+      singleLine = true,
+      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+      textStyle = onboardingBodyStyle.copy(color = onboardingText),
+      shape = RoundedCornerShape(14.dp),
+      colors = onboardingTextFieldColors(),
+    )
 
-          Text("端口", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
-          OutlinedTextField(
-            value = manualPort,
-            onValueChange = onManualPortChange,
-            placeholder = { Text(ONBOARDING_MANUAL_PORT_DEFAULT, color = onboardingTextTertiary, style = onboardingBodyStyle) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            textStyle = onboardingBodyStyle.copy(fontFamily = FontFamily.Monospace, color = onboardingText),
-            shape = RoundedCornerShape(14.dp),
-            colors =
-              onboardingTextFieldColors(),
-          )
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-          ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-              Text("使用 TLS", style = onboardingHeadlineStyle, color = onboardingText)
-              Text("使用安全 WebSocket（`wss`）。", style = onboardingCalloutStyle.copy(lineHeight = 18.sp), color = onboardingTextSecondary)
-            }
-            Switch(
-              checked = manualTls,
-              onCheckedChange = onManualTlsChange,
-              colors =
-                onboardingSwitchColors(),
-            )
-          }
-
-          Text("令牌（可选）", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
-          Text(
-            "本机设备密钥已在进入引导时重置。若此处仍填写网关共享令牌，连接会以令牌优先认证，OpenClaw 往往不再显示「待批准设备」。需要待批准时请保持为空，连接成功后再按需配置令牌。",
-            style = onboardingCaption2Style,
-            color = onboardingTextTertiary,
-          )
-          OutlinedTextField(
-            value = gatewayToken,
-            onValueChange = onTokenChange,
-            placeholder = {
-              Text(
-                "留空=设备配对；需要令牌时填写",
-                color = onboardingTextTertiary,
-                style = onboardingBodyStyle,
-              )
-            },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-            textStyle = onboardingBodyStyle.copy(color = onboardingText),
-            shape = RoundedCornerShape(14.dp),
-            colors =
-              onboardingTextFieldColors(),
-          )
-
-          Text("密码（可选）", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
-          OutlinedTextField(
-            value = gatewayPassword,
-            onValueChange = onPasswordChange,
-            placeholder = { Text("密码", color = onboardingTextTertiary, style = onboardingBodyStyle) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-            textStyle = onboardingBodyStyle.copy(color = onboardingText),
-            shape = RoundedCornerShape(14.dp),
-            colors =
-              onboardingTextFieldColors(),
-          )
-
-          if (!manualResolvedEndpoint.isNullOrBlank()) {
-            ResolvedEndpoint(endpoint = manualResolvedEndpoint)
-          }
-        }
-      }
+    if (!manualResolvedEndpoint.isNullOrBlank()) {
+      ResolvedEndpoint(endpoint = manualResolvedEndpoint)
     }
 
     if (!gatewayError.isNullOrBlank()) {
@@ -1220,53 +1050,6 @@ private fun GuideBlock(
       Text(title, style = onboardingHeadlineStyle, color = onboardingText)
       content()
     }
-  }
-}
-
-@Composable
-private fun GatewayModeToggle(
-  inputMode: GatewayInputMode,
-  onInputModeChange: (GatewayInputMode) -> Unit,
-) {
-  Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-    GatewayModeChip(
-      label = "安装码",
-      active = inputMode == GatewayInputMode.SetupCode,
-      onClick = { onInputModeChange(GatewayInputMode.SetupCode) },
-      modifier = Modifier.weight(1f),
-    )
-    GatewayModeChip(
-      label = "手动",
-      active = inputMode == GatewayInputMode.Manual,
-      onClick = { onInputModeChange(GatewayInputMode.Manual) },
-      modifier = Modifier.weight(1f),
-    )
-  }
-}
-
-@Composable
-private fun GatewayModeChip(
-  label: String,
-  active: Boolean,
-  onClick: () -> Unit,
-  modifier: Modifier = Modifier,
-) {
-  Button(
-    onClick = onClick,
-    modifier = modifier.height(40.dp),
-    shape = RoundedCornerShape(12.dp),
-    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-    colors =
-      ButtonDefaults.buttonColors(
-        containerColor = if (active) onboardingAccent else onboardingSurface,
-        contentColor = if (active) Color.White else onboardingText,
-      ),
-    border = androidx.compose.foundation.BorderStroke(1.dp, if (active) onboardingAccentBorderStrong else onboardingBorderStrong),
-  ) {
-    Text(
-      text = label,
-      style = onboardingCaption1Style.copy(fontWeight = FontWeight.Bold),
-    )
   }
 }
 
@@ -1722,6 +1505,7 @@ private fun FinalStep(
           if (pairingRequired) {
             CommandBlock("openclaw devices list")
             CommandBlock("openclaw devices approve <requestId>")
+            CommandBlock("openclaw devices approve --latest")
             Text("然后再次点击「连接」。", style = onboardingCalloutStyle, color = onboardingTextSecondary)
           }
         }
@@ -1776,7 +1560,8 @@ private fun SummaryCard(
 
 @Composable
 private fun CommandBlock(command: String) {
-  Row(
+  val context = LocalContext.current
+  Box(
     modifier =
       Modifier
         .fillMaxWidth()
@@ -1785,14 +1570,32 @@ private fun CommandBlock(command: String) {
         .background(onboardingCommandBg)
         .border(width = 1.dp, color = onboardingCommandBorder, shape = RoundedCornerShape(12.dp)),
   ) {
-    Box(modifier = Modifier.width(3.dp).fillMaxHeight().background(onboardingCommandAccent))
-    Text(
-      command,
-      modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-      style = onboardingCalloutStyle,
-      fontFamily = FontFamily.Monospace,
-      color = onboardingCommandText,
-    )
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(end = 48.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Box(modifier = Modifier.width(3.dp).fillMaxHeight().background(onboardingCommandAccent))
+      Text(
+        command,
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        style = onboardingCalloutStyle,
+        fontFamily = FontFamily.Monospace,
+        color = onboardingCommandText,
+      )
+    }
+    IconButton(
+      onClick = {
+        copyPlainTextToClipboard(
+          context = context,
+          clipLabel = command,
+          text = command,
+          toastMessage = "已复制命令",
+        )
+      },
+      modifier = Modifier.align(Alignment.CenterEnd),
+    ) {
+      Icon(Icons.Default.ContentCopy, contentDescription = "复制命令", tint = onboardingAccent)
+    }
   }
 }
 
@@ -1838,10 +1641,6 @@ private fun FeatureCard(
 
 private fun isPermissionGranted(context: Context, permission: String): Boolean {
   return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
-}
-
-private fun qrScannerErrorMessage(): String {
-  return "无法启动 Google 扫码。请更新 Google Play 服务，或改用手动输入安装码。"
 }
 
 private fun isNotificationListenerEnabled(context: Context): Boolean {

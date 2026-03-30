@@ -27,12 +27,24 @@ class SecurePrefs(
     private const val wakeEngineKey = "voiceWake.engine"
     private const val plainPrefsName = "openclaw.node"
     private const val securePrefsName = "openclaw.node.secure"
+    /** Persisted once user has finished onboarding at least once; never cleared on 「重新运行引导」. */
+    private const val onboardingWasCompletedAtLeastOnceKey = "onboarding.wasCompletedAtLeastOnce"
   }
 
   private val appContext = context.applicationContext
   private val json = Json { ignoreUnknownKeys = true }
   private val plainPrefs: SharedPreferences =
     appContext.getSharedPreferences(plainPrefsName, Context.MODE_PRIVATE)
+
+  init {
+    // Legacy installs already on the main app: avoid treating their next onboarding entry as "first run".
+    if (
+      !plainPrefs.getBoolean(onboardingWasCompletedAtLeastOnceKey, false) &&
+      plainPrefs.getBoolean("onboarding.completed", false)
+    ) {
+      plainPrefs.edit { putBoolean(onboardingWasCompletedAtLeastOnceKey, true) }
+    }
+  }
 
   private val masterKey by lazy {
     MasterKey.Builder(appContext)
@@ -214,9 +226,19 @@ class SecurePrefs(
   }
 
   fun setOnboardingCompleted(value: Boolean) {
-    plainPrefs.edit { putBoolean("onboarding.completed", value) }
+    val wasCompleted = plainPrefs.getBoolean("onboarding.completed", false)
+    plainPrefs.edit {
+      putBoolean("onboarding.completed", value)
+      if (value || wasCompleted) {
+        putBoolean(onboardingWasCompletedAtLeastOnceKey, true)
+      }
+    }
     _onboardingCompleted.value = value
   }
+
+  /** True after the user has completed onboarding at least once; used to skip identity wipe on re-entry. */
+  fun hasCompletedOnboardingAtLeastOnce(): Boolean =
+    plainPrefs.getBoolean(onboardingWasCompletedAtLeastOnceKey, false)
 
   fun setCanvasDebugStatusEnabled(value: Boolean) {
     plainPrefs.edit { putBoolean("canvas.debugStatusEnabled", value) }

@@ -1,12 +1,12 @@
 package ai.openclaw.app.ui
 
+import android.content.Context
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,11 +25,16 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -56,10 +61,8 @@ import androidx.compose.ui.unit.dp
 import ai.openclaw.app.MainViewModel
 import ai.openclaw.app.ui.mobileCardSurface
 
-private enum class ConnectInputMode {
-  SetupCode,
-  Manual,
-}
+/** 连接页默认网关共享令牌（安装/配对令牌）。 */
+internal const val DEFAULT_MANUAL_CONNECT_GATEWAY_TOKEN = "1d8bb9d66e60b6a35e2c2d098811af129629def393969ed6"
 
 @Composable
 fun ConnectTabScreen(viewModel: MainViewModel) {
@@ -70,28 +73,19 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
   val manualHost by viewModel.manualHost.collectAsState()
   val manualPort by viewModel.manualPort.collectAsState()
   val manualTls by viewModel.manualTls.collectAsState()
-  val manualEnabled by viewModel.manualEnabled.collectAsState()
   val gatewayToken by viewModel.gatewayToken.collectAsState()
+  val pairingDeviceId by viewModel.pairingDeviceId.collectAsState()
   val pendingTrust by viewModel.pendingGatewayTrust.collectAsState()
 
   var advancedOpen by rememberSaveable { mutableStateOf(false) }
-  // Do NOT put gatewayToken in remember(...) keys: each keystroke would recreate MutableState and crash Compose.
-  var inputMode by
-    remember(manualEnabled, manualHost) {
-      mutableStateOf(
-        if (manualEnabled || manualHost.isNotBlank()) {
-          ConnectInputMode.Manual
-        } else {
-          ConnectInputMode.SetupCode
-        },
-      )
-    }
+  var showResetGatewayPairingDialog by rememberSaveable { mutableStateOf(false) }
+
   LaunchedEffect(gatewayToken) {
-    if (gatewayToken.isNotBlank()) {
-      inputMode = ConnectInputMode.Manual
+    if (gatewayToken.isBlank()) {
+      viewModel.setGatewayToken(DEFAULT_MANUAL_CONNECT_GATEWAY_TOKEN)
     }
   }
-  var setupCode by rememberSaveable { mutableStateOf("") }
+
   var manualHostInput by rememberSaveable { mutableStateOf(manualHost.ifBlank { "" }) }
   var manualPortInput by rememberSaveable { mutableStateOf(manualPort.toString()) }
   var manualTlsInput by rememberSaveable { mutableStateOf(manualTls) }
@@ -130,16 +124,49 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
     )
   }
 
-  val setupResolvedEndpoint = remember(setupCode) { decodeGatewaySetupCode(setupCode)?.url?.let { parseGatewayEndpoint(it)?.displayUrl } }
+  if (showResetGatewayPairingDialog) {
+    AlertDialog(
+      onDismissRequest = { showResetGatewayPairingDialog = false },
+      containerColor = mobileCardSurface,
+      title = { Text("重置网关配对？", style = mobileHeadline, color = mobileText) },
+      text = {
+        Text(
+          "将清除本机设备密钥、所有已存设备令牌、网关安装令牌与 TLS 指纹，并轮换客户端实例 ID，然后断开连接。\n\n" +
+            "若网关仍登记本设备，请先在 Gateway 主机上执行「移除设备」：在该主机终端运行 openclaw devices list 查看 device_id，再执行 openclaw devices remove <device_id>（高级选项中可复制含本机 device_id 的完整命令）。",
+          style = mobileCallout,
+          color = mobileText,
+        )
+      },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            showResetGatewayPairingDialog = false
+            viewModel.resetGatewayPairingClientState()
+          },
+          colors = ButtonDefaults.textButtonColors(contentColor = mobileDanger),
+        ) {
+          Text("重置")
+        }
+      },
+      dismissButton = {
+        TextButton(
+          onClick = { showResetGatewayPairingDialog = false },
+          colors = ButtonDefaults.textButtonColors(contentColor = mobileTextSecondary),
+        ) {
+          Text("取消")
+        }
+      },
+    )
+  }
+
   val manualResolvedEndpoint = remember(manualHostInput, manualPortInput, manualTlsInput) {
     composeGatewayManualUrl(manualHostInput, manualPortInput, manualTlsInput)?.let { parseGatewayEndpoint(it)?.displayUrl }
   }
 
   val activeEndpoint =
-    remember(isConnected, remoteAddress, setupResolvedEndpoint, manualResolvedEndpoint, inputMode) {
+    remember(isConnected, remoteAddress, manualResolvedEndpoint) {
       when {
         isConnected && !remoteAddress.isNullOrBlank() -> remoteAddress!!
-        inputMode == ConnectInputMode.SetupCode -> setupResolvedEndpoint ?: "未设置"
         else -> manualResolvedEndpoint ?: "未设置"
       }
     }
@@ -160,7 +187,6 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
       )
     }
 
-    // Status cards in a unified card group
     Surface(
       modifier = Modifier.fillMaxWidth(),
       shape = RoundedCornerShape(14.dp),
@@ -215,7 +241,6 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
     }
 
     if (isConnected) {
-      // Outlined secondary button when connected — don't scream "danger"
       Button(
         onClick = {
           viewModel.disconnect()
@@ -245,8 +270,8 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
 
           val config =
             resolveGatewayConnectConfig(
-              useSetupCode = inputMode == ConnectInputMode.SetupCode,
-              setupCode = setupCode,
+              useSetupCode = false,
+              setupCode = "",
               manualHost = manualHostInput,
               manualPort = manualPortInput,
               manualTls = manualTlsInput,
@@ -255,12 +280,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
             )
 
           if (config == null) {
-            validationText =
-              if (inputMode == ConnectInputMode.SetupCode) {
-                "请粘贴有效的安装码以连接。"
-              } else {
-                "请输入有效的主机与端口以连接。"
-              }
+            validationText = "请输入有效的主机与端口以连接。"
             return@Button
           }
 
@@ -340,17 +360,37 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
       Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
       ) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-          Text("高级选项", style = mobileHeadline, color = mobileText)
-          Text("安装码、端点、TLS、令牌、密码与引导流程。", style = mobileCaption1, color = mobileTextSecondary)
+        Surface(
+          shape = RoundedCornerShape(10.dp),
+          color = mobileAccentSoft,
+        ) {
+          Icon(
+            imageVector = Icons.Default.Tune,
+            contentDescription = null,
+            modifier = Modifier.padding(8.dp).size(18.dp),
+            tint = mobileAccent,
+          )
         }
-        Icon(
-          imageVector = if (advancedOpen) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-          contentDescription = if (advancedOpen) "收起高级选项" else "展开高级选项",
-          tint = mobileTextSecondary,
-        )
+        Column(
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+          Text("高级选项", style = mobileHeadline, color = mobileText)
+          Text("连接参数；以及两项独立操作——打开引导、重置本机配对（用途不同）。", style = mobileCaption1, color = mobileTextSecondary)
+        }
+        Surface(
+          shape = RoundedCornerShape(10.dp),
+          color = mobileAccentSoft,
+        ) {
+          Icon(
+            imageVector = if (advancedOpen) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+            contentDescription = if (advancedOpen) "收起高级选项" else "展开高级选项",
+            modifier = Modifier.padding(8.dp).size(20.dp),
+            tint = mobileAccent,
+          )
+        }
       }
     }
 
@@ -365,137 +405,215 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
           modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp),
           verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-          Text("连接方式", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            MethodChip(
-              label = "安装码",
-              active = inputMode == ConnectInputMode.SetupCode,
-              onClick = { inputMode = ConnectInputMode.SetupCode },
-            )
-            MethodChip(
-              label = "手动",
-              active = inputMode == ConnectInputMode.Manual,
-              onClick = { inputMode = ConnectInputMode.Manual },
+          Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("连接参数", style = mobileHeadline, color = mobileText)
+            Text(
+              "手动指定 Gateway 与可选令牌/密码，不涉及本机设备身份。",
+              style = mobileCaption1,
+              color = mobileTextSecondary,
             )
           }
 
-          Text("在 Gateway 主机上执行：", style = mobileCallout, color = mobileTextSecondary)
-          CommandBlock("openclaw qr --setup-code-only")
-          CommandBlock("openclaw qr --json")
+          Text("主机", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+          OutlinedTextField(
+            value = manualHostInput,
+            onValueChange = {
+              manualHostInput = it
+              validationText = null
+            },
+            placeholder = { Text("网关主机名或 IP", style = mobileBody, color = mobileTextTertiary) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            textStyle = mobileBody.copy(color = mobileText),
+            shape = RoundedCornerShape(14.dp),
+            colors = outlinedColors(),
+          )
 
-          if (inputMode == ConnectInputMode.SetupCode) {
-            Text("安装码", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
-            OutlinedTextField(
-              value = setupCode,
-              onValueChange = {
-                setupCode = it
+          Text("端口", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+          OutlinedTextField(
+            value = manualPortInput,
+            onValueChange = {
+              manualPortInput = it
+              validationText = null
+            },
+            placeholder = { Text("18789", style = mobileBody, color = mobileTextTertiary) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            textStyle = mobileBody.copy(fontFamily = FontFamily.Monospace, color = mobileText),
+            shape = RoundedCornerShape(14.dp),
+            colors = outlinedColors(),
+          )
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+              Text("使用 TLS", style = mobileHeadline, color = mobileText)
+              Text("使用安全 WebSocket（`wss`）。", style = mobileCallout, color = mobileTextSecondary)
+            }
+            Switch(
+              checked = manualTlsInput,
+              onCheckedChange = {
+                manualTlsInput = it
                 validationText = null
               },
-              placeholder = { Text("粘贴安装码", style = mobileBody, color = mobileTextTertiary) },
-              modifier = Modifier.fillMaxWidth(),
-              minLines = 3,
-              maxLines = 5,
-              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-              textStyle = mobileBody.copy(fontFamily = FontFamily.Monospace, color = mobileText),
-              shape = RoundedCornerShape(14.dp),
-              colors = outlinedColors(),
+              colors =
+                SwitchDefaults.colors(
+                  checkedTrackColor = mobileAccent,
+                  uncheckedTrackColor = mobileBorderStrong,
+                  checkedThumbColor = Color.White,
+                  uncheckedThumbColor = Color.White,
+                ),
             )
-            if (!setupResolvedEndpoint.isNullOrBlank()) {
-              EndpointPreview(endpoint = setupResolvedEndpoint)
-            }
-          } else {
-            Text("主机", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
-            OutlinedTextField(
-              value = manualHostInput,
-              onValueChange = {
-                manualHostInput = it
-                validationText = null
-              },
-              placeholder = { Text("网关主机名或 IP", style = mobileBody, color = mobileTextTertiary) },
-              modifier = Modifier.fillMaxWidth(),
-              singleLine = true,
-              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-              textStyle = mobileBody.copy(color = mobileText),
-              shape = RoundedCornerShape(14.dp),
-              colors = outlinedColors(),
-            )
+          }
 
-            Text("端口", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
-            OutlinedTextField(
-              value = manualPortInput,
-              onValueChange = {
-                manualPortInput = it
-                validationText = null
-              },
-              placeholder = { Text("18789", style = mobileBody, color = mobileTextTertiary) },
-              modifier = Modifier.fillMaxWidth(),
-              singleLine = true,
-              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-              textStyle = mobileBody.copy(fontFamily = FontFamily.Monospace, color = mobileText),
-              shape = RoundedCornerShape(14.dp),
-              colors = outlinedColors(),
-            )
+          Text("令牌（可选）", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+          OutlinedTextField(
+            value = gatewayToken,
+            onValueChange = { viewModel.setGatewayToken(it) },
+            placeholder = { Text("令牌", style = mobileBody, color = mobileTextTertiary) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+            textStyle = mobileBody.copy(color = mobileText),
+            shape = RoundedCornerShape(14.dp),
+            colors = outlinedColors(),
+          )
 
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-              Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("使用 TLS", style = mobileHeadline, color = mobileText)
-                Text("使用安全 WebSocket（`wss`）。", style = mobileCallout, color = mobileTextSecondary)
-              }
-              Switch(
-                checked = manualTlsInput,
-                onCheckedChange = {
-                  manualTlsInput = it
-                  validationText = null
-                },
-                colors =
-                  SwitchDefaults.colors(
-                    checkedTrackColor = mobileAccent,
-                    uncheckedTrackColor = mobileBorderStrong,
-                    checkedThumbColor = Color.White,
-                    uncheckedThumbColor = Color.White,
-                  ),
-              )
-            }
+          Text("密码（可选）", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+          OutlinedTextField(
+            value = passwordInput,
+            onValueChange = { passwordInput = it },
+            placeholder = { Text("密码", style = mobileBody, color = mobileTextTertiary) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+            textStyle = mobileBody.copy(color = mobileText),
+            shape = RoundedCornerShape(14.dp),
+            colors = outlinedColors(),
+          )
 
-            Text("令牌（可选）", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
-            OutlinedTextField(
-              value = gatewayToken,
-              onValueChange = { viewModel.setGatewayToken(it) },
-              placeholder = { Text("令牌", style = mobileBody, color = mobileTextTertiary) },
-              modifier = Modifier.fillMaxWidth(),
-              singleLine = true,
-              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-              textStyle = mobileBody.copy(color = mobileText),
-              shape = RoundedCornerShape(14.dp),
-              colors = outlinedColors(),
-            )
-
-            Text("密码（可选）", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
-            OutlinedTextField(
-              value = passwordInput,
-              onValueChange = { passwordInput = it },
-              placeholder = { Text("密码", style = mobileBody, color = mobileTextTertiary) },
-              modifier = Modifier.fillMaxWidth(),
-              singleLine = true,
-              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-              textStyle = mobileBody.copy(color = mobileText),
-              shape = RoundedCornerShape(14.dp),
-              colors = outlinedColors(),
-            )
-
-            if (!manualResolvedEndpoint.isNullOrBlank()) {
-              EndpointPreview(endpoint = manualResolvedEndpoint)
-            }
+          if (!manualResolvedEndpoint.isNullOrBlank()) {
+            EndpointPreview(endpoint = manualResolvedEndpoint)
           }
 
           HorizontalDivider(color = mobileBorder)
 
-          TextButton(onClick = { viewModel.setOnboardingCompleted(false) }) {
-            Text("重新运行引导", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold), color = mobileAccent)
+          Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("维护", style = mobileHeadline, color = mobileText)
+            Text(
+              "「打开引导」与「重置配对」不是同一件事：前者只复查向导，后者清除本机密钥与网关侧登记所需的数据。请按需选择。",
+              style = mobileCallout,
+              color = mobileTextSecondary,
+            )
+          }
+
+          Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            color = mobileAccentSoft,
+            border = BorderStroke(1.dp, mobileAccent.copy(alpha = 0.28f)),
+          ) {
+            Column(
+              modifier = Modifier.padding(14.dp),
+              verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+              Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
+              ) {
+                Surface(
+                  shape = RoundedCornerShape(10.dp),
+                  color = mobileAccent.copy(alpha = 0.12f),
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.padding(8.dp).size(20.dp),
+                    tint = mobileAccent,
+                  )
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                  Text("重新运行引导", style = mobileHeadline, color = mobileText)
+                  Text(
+                    "再次打开首次设置向导（欢迎、Gateway、权限等）。不会清除本机设备密钥，也不替代网关侧的移除/批准操作。",
+                    style = mobileCallout,
+                    color = mobileTextSecondary,
+                  )
+                }
+              }
+              OutlinedButton(
+                onClick = { viewModel.setOnboardingCompleted(false) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, mobileAccent.copy(alpha = 0.45f)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = mobileAccent),
+              ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("打开首次设置向导", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
+              }
+            }
+          }
+
+          Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            color = mobileDangerSoft,
+            border = BorderStroke(1.dp, mobileDanger.copy(alpha = 0.35f)),
+          ) {
+            Column(
+              modifier = Modifier.padding(14.dp),
+              verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+              Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
+              ) {
+                Surface(
+                  shape = RoundedCornerShape(10.dp),
+                  color = mobileDanger.copy(alpha = 0.12f),
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.Security,
+                    contentDescription = null,
+                    modifier = Modifier.padding(8.dp).size(20.dp),
+                    tint = mobileDanger,
+                  )
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                  Text("重置网关配对（本机）", style = mobileHeadline, color = mobileText)
+                  Text(
+                    "清除本机设备密钥、已存令牌与 TLS 信任等并断开连接；用于换新配对。影响大于仅打开引导。",
+                    style = mobileCallout,
+                    color = mobileTextSecondary,
+                  )
+                }
+              }
+              Text(
+                "在网关主机终端执行 openclaw devices remove …。下方为含本机 device_id 的完整命令，可一键复制。若本机曾重置身份而网关仍为旧登记，以网关 list 中的 id 为准。",
+                style = mobileCallout,
+                color = mobileTextSecondary,
+              )
+              CopyableCommandRow(command = "openclaw devices remove $pairingDeviceId", context = context)
+              Button(
+                onClick = { showResetGatewayPairingDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors =
+                  ButtonDefaults.buttonColors(
+                    containerColor = mobileDanger.copy(alpha = 0.28f),
+                    contentColor = mobileDanger,
+                  ),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, mobileDanger.copy(alpha = 0.45f)),
+              ) {
+                Text("执行重置（需确认）", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
+              }
+            }
           }
         }
       }
@@ -508,39 +626,40 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
 }
 
 @Composable
-private fun MethodChip(label: String, active: Boolean, onClick: () -> Unit) {
-  Button(
-    onClick = onClick,
-    modifier = Modifier.height(40.dp),
-    shape = RoundedCornerShape(12.dp),
-    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-    colors =
-      ButtonDefaults.buttonColors(
-        containerColor = if (active) mobileAccent else mobileSurface,
-        contentColor = if (active) Color.White else mobileText,
-      ),
-    border = BorderStroke(1.dp, if (active) mobileAccentBorderStrong else mobileBorderStrong),
-  ) {
-    Text(label, style = mobileCaption1.copy(fontWeight = FontWeight.Bold))
-  }
-}
-
-@Composable
-private fun CommandBlock(command: String) {
+private fun CopyableCommandRow(command: String, context: Context) {
   Surface(
     modifier = Modifier.fillMaxWidth(),
     shape = RoundedCornerShape(12.dp),
     color = mobileCodeBg,
     border = BorderStroke(1.dp, mobileCodeBorder),
   ) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-      Box(modifier = Modifier.width(3.dp).height(42.dp).background(mobileCodeAccent))
-      Text(
-        text = command,
-        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-        style = mobileCallout.copy(fontFamily = FontFamily.Monospace),
-        color = mobileCodeText,
-      )
+    Box(modifier = Modifier.fillMaxWidth()) {
+      Row(
+        modifier =
+          Modifier.fillMaxWidth().padding(end = 48.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Box(modifier = Modifier.width(3.dp).height(42.dp).background(mobileCodeAccent))
+        Text(
+          text = command,
+          modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+          style = mobileCallout.copy(fontFamily = FontFamily.Monospace),
+          color = mobileCodeText,
+        )
+      }
+      IconButton(
+        onClick = {
+          copyPlainTextToClipboard(
+            context = context,
+            clipLabel = "openclaw devices remove",
+            text = command,
+            toastMessage = "已复制命令",
+          )
+        },
+        modifier = Modifier.align(Alignment.CenterEnd),
+      ) {
+        Icon(Icons.Default.ContentCopy, contentDescription = "复制命令", tint = mobileAccent)
+      }
     }
   }
 }

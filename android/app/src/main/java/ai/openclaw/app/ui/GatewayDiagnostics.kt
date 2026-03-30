@@ -97,3 +97,14 @@ internal fun copyGatewayDiagnosticsReport(
   clipboard.setPrimaryClip(ClipData.newPlainText("OpenClaw Gateway 诊断信息", report))
   Toast.makeText(context, "已复制 Gateway 诊断信息", Toast.LENGTH_SHORT).show()
 }
+
+internal fun copyPlainTextToClipboard(
+  context: Context,
+  clipLabel: String,
+  text: String,
+  toastMessage: String,
+) {
+  val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
+  clipboard.setPrimaryClip(ClipData.newPlainText(clipLabel, text))
+  Toast.makeText(context, toastMessage, Toast.LENGTH_SHORT).show()
+}
