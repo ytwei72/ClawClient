@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.lazy.items
@@ -73,14 +72,6 @@ private enum class HomeTab(
   Settings(label = "设置", icon = Icons.Default.Settings),
 }
 
-private enum class StatusVisual {
-  Connected,
-  Connecting,
-  Warning,
-  Error,
-  Offline,
-}
-
 @Composable
 fun PostOnboardingTabs(viewModel: MainViewModel, modifier: Modifier = Modifier) {
   var activeTab by rememberSaveable { mutableStateOf(HomeTab.Connect) }
@@ -90,6 +81,8 @@ fun PostOnboardingTabs(viewModel: MainViewModel, modifier: Modifier = Modifier) 
 
   // Stop TTS when user navigates away from voice tab, and lazily keep the Chat/Screen tabs
   // alive after the first visit so repeated tab switches do not rebuild their UI trees.
+  val selectVoiceTabRevision by viewModel.selectVoiceTabRevision.collectAsState()
+
   LaunchedEffect(activeTab) {
     viewModel.setVoiceScreenActive(activeTab == HomeTab.Voice)
     if (activeTab == HomeTab.Chat) {
@@ -100,32 +93,34 @@ fun PostOnboardingTabs(viewModel: MainViewModel, modifier: Modifier = Modifier) 
     }
   }
 
+  LaunchedEffect(selectVoiceTabRevision) {
+    if (selectVoiceTabRevision > 0) {
+      activeTab = HomeTab.Voice
+    }
+  }
+
   val statusText by viewModel.statusText.collectAsState()
   val isConnected by viewModel.isConnected.collectAsState()
   val chatSessionKey by viewModel.chatSessionKey.collectAsState()
   val mainSessionKey by viewModel.mainSessionKey.collectAsState()
   val chatSessions by viewModel.chatSessions.collectAsState()
   val chatGatewayAgents by viewModel.chatGatewayAgents.collectAsState()
-  val chatTopTitle =
+  val chatTopBarTitles =
     remember(activeTab, chatSessionKey, chatGatewayAgents) {
-      if (activeTab != HomeTab.Chat) {
-        "OpenClaw"
-      } else {
-        buildCompactChatTitle(chatSessionKey, chatGatewayAgents)
+      when (activeTab) {
+        HomeTab.Chat -> {
+          val (agent, session) = buildChatTopBarTitles(chatSessionKey, chatGatewayAgents)
+          agent to session
+        }
+        else -> "OpenClaw" to null
       }
     }
+  val (chatTopTitle, chatTopSubtitle) = chatTopBarTitles
 
-  val statusVisual =
-    remember(statusText, isConnected) {
-      val lower = statusText.lowercase()
-      when {
-        isConnected -> StatusVisual.Connected
-        lower.contains("connecting") || lower.contains("reconnecting") -> StatusVisual.Connecting
-        lower.contains("pairing") || lower.contains("approval") || lower.contains("auth") -> StatusVisual.Warning
-        lower.contains("error") || lower.contains("failed") -> StatusVisual.Error
-        else -> StatusVisual.Offline
-      }
-    }
+  val statusVisual = remember(statusText, isConnected) { deriveScreenStatusVisual(statusText, isConnected) }
+  val micEnabled by viewModel.micEnabled.collectAsState()
+  val micCooldown by viewModel.micCooldown.collectAsState()
+  val speakerEnabled by viewModel.speakerEnabled.collectAsState()
 
   val density = LocalDensity.current
   val imeVisible = WindowInsets.ime.getBottom(density) > 0
@@ -136,12 +131,16 @@ fun PostOnboardingTabs(viewModel: MainViewModel, modifier: Modifier = Modifier) 
     containerColor = Color.Transparent,
     contentWindowInsets = WindowInsets(0, 0, 0, 0),
     topBar = {
-      TopStatusBar(
+      ScreenTopStatusBar(
         titleText = chatTopTitle,
+        titleSubtitle = chatTopSubtitle,
         titleClickable = activeTab == HomeTab.Chat,
         onTitleClick = { showChatSelector = true },
-        statusText = formatConnectionStatusForUi(statusText),
+        connectionStatusText = formatConnectionStatusForUi(statusText),
         statusVisual = statusVisual,
+        micEnabled = micEnabled,
+        micCooldown = micCooldown,
+        speakerEnabled = speakerEnabled,
       )
     },
     bottomBar = {
@@ -233,109 +232,8 @@ private fun ScreenTabScreen(viewModel: MainViewModel, visible: Boolean, modifier
   }
 }
 
-@Composable
-private fun TopStatusBar(
-  titleText: String,
-  titleClickable: Boolean,
-  onTitleClick: () -> Unit,
-  statusText: String,
-  statusVisual: StatusVisual,
-) {
-  val safeInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
-
-  val (chipBg, chipDot, chipText, chipBorder) =
-    when (statusVisual) {
-      StatusVisual.Connected ->
-        listOf(
-          mobileSuccessSoft,
-          mobileSuccess,
-          mobileSuccess,
-          LocalMobileColors.current.chipBorderConnected,
-        )
-      StatusVisual.Connecting ->
-        listOf(
-          mobileAccentSoft,
-          mobileAccent,
-          mobileAccent,
-          LocalMobileColors.current.chipBorderConnecting,
-        )
-      StatusVisual.Warning ->
-        listOf(
-          mobileWarningSoft,
-          mobileWarning,
-          mobileWarning,
-          LocalMobileColors.current.chipBorderWarning,
-        )
-      StatusVisual.Error ->
-        listOf(
-          mobileDangerSoft,
-          mobileDanger,
-          mobileDanger,
-          LocalMobileColors.current.chipBorderError,
-        )
-      StatusVisual.Offline ->
-        listOf(
-          mobileSurface,
-          mobileTextTertiary,
-          mobileTextSecondary,
-          mobileBorder,
-        )
-    }
-
-  Surface(
-    modifier = Modifier.fillMaxWidth().windowInsetsPadding(safeInsets),
-    color = Color.Transparent,
-    shadowElevation = 0.dp,
-  ) {
-    Row(
-      modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-      Surface(
-        onClick = {
-          if (titleClickable) onTitleClick()
-        },
-        color = Color.Transparent,
-      ) {
-        Text(
-          text = titleText,
-          style = mobileTitle2,
-          color = mobileText,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
-      }
-      Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = chipBg,
-        border = androidx.compose.foundation.BorderStroke(1.dp, chipBorder),
-      ) {
-        Row(
-          modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Surface(
-            modifier = Modifier.padding(top = 1.dp),
-            color = chipDot,
-            shape = RoundedCornerShape(999.dp),
-          ) {
-            Box(modifier = Modifier.padding(4.dp))
-          }
-          Text(
-            text = statusText.trim().ifEmpty { "离线" },
-            style = mobileCaption1,
-            color = chipText,
-            maxLines = 1,
-          )
-        }
-      }
-    }
-  }
-}
-
-private fun buildCompactChatTitle(sessionKey: String, agents: List<ChatGatewayAgent>): String {
+/** 聊天顶栏：主行为 Agent 名称，副行为会话名称（双行，与右侧系统状态栏语义分离）。 */
+private fun buildChatTopBarTitles(sessionKey: String, agents: List<ChatGatewayAgent>): Pair<String, String> {
   val agentId = agentIdFromSessionKey(sessionKey)
   val fullAgentName =
     if (agentId.isNullOrBlank()) {
@@ -345,9 +243,9 @@ private fun buildCompactChatTitle(sessionKey: String, agents: List<ChatGatewayAg
       match?.name?.trim()?.takeIf { it.isNotEmpty() } ?: agentId
     }
   val sessionName = friendlySessionName(sessionKey)
-  val shortAgent = fullAgentName.trim().ifEmpty { "默认" }.take(10)
-  val shortSession = sessionName.trim().ifEmpty { "会话" }.take(10)
-  return "$shortAgent：$shortSession"
+  val agentLine = fullAgentName.trim().ifEmpty { "默认" }
+  val sessionLine = sessionName.trim().ifEmpty { "会话" }
+  return agentLine to sessionLine
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

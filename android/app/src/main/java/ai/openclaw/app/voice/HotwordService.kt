@@ -48,6 +48,9 @@ import java.io.FileOutputStream
 class HotwordService : Service() {
   companion object {
     const val actionWakeTriggered = "ai.openclaw.app.action.WAKE_TRIGGERED"
+    /** Broadcast extras: recognized / trigger label and wall-clock time of the hit. */
+    const val extraWakeTriggerLabel = "ai.openclaw.extra.WAKE_TRIGGER_LABEL"
+    const val extraWakeTimeEpochMs = "ai.openclaw.extra.WAKE_TIME_EPOCH_MS"
     private const val channelId = "openclaw_hotword"
     private const val notificationId = 4001
     private const val sampleRate = 16_000.0f
@@ -634,7 +637,12 @@ class HotwordService : Service() {
 
   private fun dispatchWakeAndLaunch(triggerLabel: String) {
     debugLog("发送 WAKE_TRIGGERED 广播 ($triggerLabel)")
-    sendBroadcast(Intent(actionWakeTriggered).setPackage(packageName))
+    sendBroadcast(
+      Intent(actionWakeTriggered).setPackage(packageName).apply {
+        putExtra(extraWakeTriggerLabel, triggerLabel)
+        putExtra(extraWakeTimeEpochMs, System.currentTimeMillis())
+      },
+    )
     try {
       val launchIntent =
         Intent(this, MainActivity::class.java).apply {

@@ -12,6 +12,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +26,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -35,15 +39,29 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -59,6 +77,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -69,10 +88,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import ai.openclaw.app.MainViewModel
+import ai.openclaw.app.VoiceWakeMode
+import ai.openclaw.app.WakeEngine
+import ai.openclaw.app.WakeWords
+import ai.openclaw.app.voice.SherpaKwsKeywords
 import ai.openclaw.app.voice.VoiceConversationEntry
 import ai.openclaw.app.voice.VoiceConversationRole
 import kotlin.math.max
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoiceTabScreen(viewModel: MainViewModel) {
   val context = LocalContext.current
@@ -144,10 +168,13 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
       contentPadding = PaddingValues(vertical = 4.dp),
       verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+      item {
+        VoiceWakeHotwordSection(viewModel = viewModel)
+      }
       if (micConversation.isEmpty() && !showThinkingBubble) {
         item {
           Box(
-            modifier = Modifier.fillParentMaxHeight().fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp),
             contentAlignment = Alignment.Center,
           ) {
             Column(
@@ -166,7 +193,7 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
                 color = mobileTextSecondary,
               )
               Text(
-                "每次停顿会自动发送一轮对话。",
+                "使用系统语音识别；可多段识别并拼成一轮，关闭麦克风后发送对话。",
                 style = mobileCallout,
                 color = mobileTextTertiary,
               )
@@ -423,6 +450,309 @@ private fun ThinkingDot(alpha: Float, color: Color) {
     color = color,
   ) {}
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VoiceWakeHotwordSection(viewModel: MainViewModel) {
+  val context = LocalContext.current
+  val voiceWakeMode by viewModel.voiceWakeMode.collectAsState()
+  val wakeEngine by viewModel.wakeEngine.collectAsState()
+  val wakeWords by viewModel.wakeWords.collectAsState()
+  val hotwordDebugLogs by viewModel.hotwordDebugLogs.collectAsState()
+  var hotwordTestStatus by remember { mutableStateOf<String?>(null) }
+  var hotwordLogExpanded by remember { mutableStateOf(false) }
+  var wakeWordMenuExpanded by remember { mutableStateOf(false) }
+  var prevWakeModeForMicLinkage by remember { mutableStateOf<VoiceWakeMode?>(null) }
+  val sherpaWakeWordLabels =
+    remember(context) {
+      runCatching { SherpaKwsKeywords.displayLabelsOrdered(context.assets) }.getOrElse { emptyList() }
+    }
+  val wakeWordOptions =
+    remember(wakeEngine, sherpaWakeWordLabels) {
+      when (wakeEngine) {
+        WakeEngine.Vosk -> WakeWords.voskWakeWordMenuOptions
+        WakeEngine.SherpaOnnx -> sherpaWakeWordLabels
+      }
+    }
+
+  LaunchedEffect(voiceWakeMode) {
+    hotwordTestStatus = null
+    val prev = prevWakeModeForMicLinkage
+    prevWakeModeForMicLinkage = voiceWakeMode
+    val shouldOpenMic =
+      when {
+        prev == null && voiceWakeMode != VoiceWakeMode.Off -> true
+        prev == VoiceWakeMode.Off && voiceWakeMode != VoiceWakeMode.Off -> true
+        else -> false
+      }
+    if (shouldOpenMic && context.hasRecordAudioPermission()) {
+      viewModel.setMicEnabled(true)
+    }
+  }
+
+  LaunchedEffect(wakeWords, wakeWordOptions) {
+    val primary = wakeWords.firstOrNull().orEmpty()
+    if (wakeWordOptions.isEmpty()) return@LaunchedEffect
+    if (primary.isEmpty() || primary !in wakeWordOptions) {
+      viewModel.setWakeWords(listOf(wakeWordOptions.first()))
+    }
+  }
+
+  val listItemColors =
+    ListItemDefaults.colors(
+      containerColor = Color.Transparent,
+      headlineColor = mobileText,
+      supportingColor = mobileTextSecondary,
+      trailingIconColor = mobileTextSecondary,
+      leadingIconColor = mobileTextSecondary,
+    )
+
+  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Text(
+      "语音唤醒",
+      style = mobileCaption1.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+      color = mobileAccent,
+    )
+    Column(modifier = Modifier.voiceSettingsRowModifier()) {
+      ListItem(
+        modifier = Modifier.fillMaxWidth(),
+        colors = listItemColors,
+        headlineContent = { Text("关闭", style = mobileHeadline) },
+        supportingContent = { Text("不启用后台热词监听。", style = mobileCallout) },
+        trailingContent = {
+          RadioButton(
+            selected = voiceWakeMode == VoiceWakeMode.Off,
+            onClick = { viewModel.setVoiceWakeMode(VoiceWakeMode.Off) },
+          )
+        },
+      )
+      HorizontalDivider(color = mobileBorder)
+      ListItem(
+        modifier = Modifier.fillMaxWidth(),
+        colors = listItemColors,
+        headlineContent = { Text("仅前台", style = mobileHeadline) },
+        supportingContent = { Text("应用在前台时监听唤醒词。", style = mobileCallout) },
+        trailingContent = {
+          RadioButton(
+            selected = voiceWakeMode == VoiceWakeMode.Foreground,
+            onClick = { viewModel.setVoiceWakeMode(VoiceWakeMode.Foreground) },
+          )
+        },
+      )
+      HorizontalDivider(color = mobileBorder)
+      ListItem(
+        modifier = Modifier.fillMaxWidth(),
+        colors = listItemColors,
+        headlineContent = { Text("始终监听", style = mobileHeadline) },
+        supportingContent = { Text("后台前台均可唤醒（更耗电）。", style = mobileCallout) },
+        trailingContent = {
+          RadioButton(
+            selected = voiceWakeMode == VoiceWakeMode.Always,
+            onClick = { viewModel.setVoiceWakeMode(VoiceWakeMode.Always) },
+          )
+        },
+      )
+      HorizontalDivider(color = mobileBorder)
+      ListItem(
+        modifier = Modifier.fillMaxWidth(),
+        colors = listItemColors,
+        headlineContent = { Text("唤醒引擎：Vosk", style = mobileHeadline) },
+        supportingContent = {
+          Text(
+            "小型英文模型：下方唤醒词仅提供可命中的英文词（如 openclaw），勿与 Sherpa 中文词混用。",
+            style = mobileCallout,
+          )
+        },
+        trailingContent = {
+          RadioButton(
+            selected = wakeEngine == WakeEngine.Vosk,
+            onClick = { viewModel.setWakeEngine(WakeEngine.Vosk) },
+          )
+        },
+      )
+      HorizontalDivider(color = mobileBorder)
+      ListItem(
+        modifier = Modifier.fillMaxWidth(),
+        colors = listItemColors,
+        headlineContent = { Text("唤醒引擎：Sherpa-ONNX", style = mobileHeadline) },
+        supportingContent = {
+          Text(
+            "中文 KWS（WeNetSpeech）：唤醒词须与 APK 内 keywords.txt 中 @ 后面的词一致，或使用该文件中已有示例；自定义词需按官方文档用 text2token 生成音素行。",
+            style = mobileCallout,
+          )
+        },
+        trailingContent = {
+          RadioButton(
+            selected = wakeEngine == WakeEngine.SherpaOnnx,
+            onClick = { viewModel.setWakeEngine(WakeEngine.SherpaOnnx) },
+          )
+        },
+      )
+      HorizontalDivider(color = mobileBorder)
+      Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+        val displayWakeWord =
+          wakeWords.firstOrNull().takeIf { it in wakeWordOptions }.orEmpty()
+            .ifEmpty { wakeWordOptions.firstOrNull().orEmpty() }
+        ExposedDropdownMenuBox(
+          expanded = wakeWordMenuExpanded,
+          onExpandedChange = { wakeWordMenuExpanded = it },
+        ) {
+          OutlinedTextField(
+            value = displayWakeWord,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("唤醒词", style = mobileCaption1, color = mobileTextSecondary) },
+            modifier =
+              Modifier
+                .menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = true)
+                .fillMaxWidth(),
+            textStyle = mobileBody.copy(color = mobileText),
+            colors = voiceSettingsTextFieldColors(),
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = wakeWordMenuExpanded) },
+            singleLine = true,
+          )
+          DropdownMenu(
+            expanded = wakeWordMenuExpanded,
+            onDismissRequest = { wakeWordMenuExpanded = false },
+          ) {
+            wakeWordOptions.forEach { label ->
+              DropdownMenuItem(
+                text = { Text(label, style = mobileBody.copy(color = mobileText)) },
+                onClick = {
+                  wakeWordMenuExpanded = false
+                  if (label != displayWakeWord) {
+                    viewModel.setWakeWords(listOf(label))
+                  }
+                },
+              )
+            }
+          }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+          onClick = {
+            hotwordTestStatus = viewModel.triggerHotwordWakeTest()
+          },
+          modifier = Modifier.fillMaxWidth(),
+          colors = voiceSettingsPrimaryButtonColors(),
+          shape = RoundedCornerShape(12.dp),
+        ) {
+          Text("测试唤醒", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+          "测试会模拟命中唤醒词并拉起麦克风，可在下方热词调试日志查看记录。",
+          style = mobileCaption1,
+          color = mobileTextTertiary,
+        )
+        hotwordTestStatus?.let { status ->
+          val isFailure = status.startsWith("测试失败")
+          Spacer(modifier = Modifier.height(6.dp))
+          Text(
+            status,
+            style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
+            color = if (isFailure) mobileDanger else mobileAccent,
+          )
+        }
+      }
+    }
+
+    Text(
+      "热词调试日志",
+      style = mobileCaption1.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+      color = mobileAccent,
+    )
+    Column(modifier = Modifier.voiceSettingsRowModifier()) {
+      Row(
+        modifier =
+          Modifier
+            .fillMaxWidth()
+            .clickable { hotwordLogExpanded = !hotwordLogExpanded }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          if (hotwordLogExpanded) "收起" else "展开（最近 ${hotwordDebugLogs.size} 条）",
+          style = mobileCallout,
+          color = mobileTextSecondary,
+        )
+        Icon(
+          imageVector = if (hotwordLogExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+          contentDescription = if (hotwordLogExpanded) "收起" else "展开",
+          tint = mobileTextSecondary,
+          modifier = Modifier.size(22.dp),
+        )
+      }
+      if (hotwordLogExpanded) {
+        HorizontalDivider(color = mobileBorder)
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+          horizontalArrangement = Arrangement.End,
+        ) {
+          Button(
+            onClick = {
+              viewModel.clearHotwordDebugLogs()
+              hotwordTestStatus = null
+            },
+            enabled = hotwordDebugLogs.isNotEmpty(),
+            colors = voiceSettingsPrimaryButtonColors(),
+            shape = RoundedCornerShape(12.dp),
+          ) {
+            Text("清空", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
+          }
+        }
+        HorizontalDivider(color = mobileBorder)
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+          if (hotwordDebugLogs.isEmpty()) {
+            Text("暂无日志", style = mobileCallout, color = mobileTextTertiary)
+          } else {
+            SelectionContainer {
+              Column {
+                hotwordDebugLogs.takeLast(20).forEach { line ->
+                  Text(
+                    line,
+                    style = mobileCaption1.copy(fontFamily = FontFamily.Monospace),
+                    color = mobileTextSecondary,
+                    modifier = Modifier.padding(vertical = 2.dp),
+                  )
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun voiceSettingsTextFieldColors() =
+  OutlinedTextFieldDefaults.colors(
+    focusedContainerColor = mobileSurface,
+    unfocusedContainerColor = mobileSurface,
+    focusedBorderColor = mobileAccent,
+    unfocusedBorderColor = mobileBorder,
+    focusedTextColor = mobileText,
+    unfocusedTextColor = mobileText,
+    cursorColor = mobileAccent,
+  )
+
+@Composable
+private fun Modifier.voiceSettingsRowModifier() =
+  this
+    .fillMaxWidth()
+    .border(width = 1.dp, color = mobileBorder, shape = RoundedCornerShape(14.dp))
+    .background(mobileCardSurface, RoundedCornerShape(14.dp))
+
+@Composable
+private fun voiceSettingsPrimaryButtonColors() =
+  ButtonDefaults.buttonColors(
+    containerColor = mobileAccent,
+    contentColor = Color.White,
+    disabledContainerColor = mobileAccent.copy(alpha = 0.45f),
+    disabledContentColor = Color.White.copy(alpha = 0.9f),
+  )
 
 private fun Context.hasRecordAudioPermission(): Boolean {
   return (

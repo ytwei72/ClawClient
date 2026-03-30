@@ -98,6 +98,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val wakeEngine: StateFlow<WakeEngine> = prefs.wakeEngine
   val wakeWords: StateFlow<List<String>> = prefs.wakeWords
   val hotwordDebugLogs: StateFlow<List<String>> = HotwordDebugLogger.logs
+  val selectVoiceTabRevision: StateFlow<Int> = runtimeState(0) { it.selectVoiceTabRevision }
 
   val micCooldown: StateFlow<Boolean> = runtimeState(initial = false) { it.micCooldown }
   val micStatusText: StateFlow<String> = runtimeState(initial = "麦克风关") { it.micStatusText }

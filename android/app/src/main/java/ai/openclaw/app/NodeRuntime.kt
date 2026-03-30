@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.SystemClock
 import android.util.Log
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import ai.openclaw.app.chat.ChatController
 import ai.openclaw.app.chat.ChatGatewayAgent
@@ -33,6 +34,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -67,6 +71,8 @@ class NodeRuntime(
   private var hotwordRunning = false
   private var lastHotwordSessionKey: String? = null
   private val wakeTraceTag = "WakeTrace"
+  private val _selectVoiceTabRevision = MutableStateFlow(0)
+  val selectVoiceTabRevision: StateFlow<Int> = _selectVoiceTabRevision.asStateFlow()
 
   private fun traceWake(message: String, toDebugPanel: Boolean = true) {
     Log.i(wakeTraceTag, message)
@@ -393,7 +399,23 @@ class NodeRuntime(
     object : BroadcastReceiver() {
       override fun onReceive(context: Context?, intent: Intent?) {
         if (intent?.action != HotwordService.actionWakeTriggered) return
-        traceWake("收到 WAKE_TRIGGERED 广播，准备打开麦克风")
+        val triggerRaw =
+          intent.getStringExtra(HotwordService.extraWakeTriggerLabel)?.trim().orEmpty()
+        val trigger =
+          triggerRaw.ifEmpty {
+            prefs.wakeWords.value.firstOrNull().orEmpty().ifEmpty { "（未知）" }
+          }
+        val epoch = intent.getLongExtra(HotwordService.extraWakeTimeEpochMs, System.currentTimeMillis())
+        _selectVoiceTabRevision.value = _selectVoiceTabRevision.value + 1
+        scope.launch(Dispatchers.Main) {
+          val tf = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
+          Toast.makeText(
+            appContext,
+            "唤醒成功：「$trigger」· ${tf.format(Date(epoch))}",
+            Toast.LENGTH_LONG,
+          ).show()
+        }
+        traceWake("收到 WAKE_TRIGGERED 广播，识别「$trigger」，准备打开麦克风")
         setMicEnabled(true)
       }
     }
@@ -791,7 +813,14 @@ class NodeRuntime(
       return "测试失败：麦克风权限未授权"
     }
     traceWake("手动测试：模拟命中唤醒词")
-    appContext.sendBroadcast(Intent(HotwordService.actionWakeTriggered).setPackage(appContext.packageName))
+    appContext.sendBroadcast(
+      Intent(HotwordService.actionWakeTriggered)
+        .setPackage(appContext.packageName)
+        .apply {
+          putExtra(HotwordService.extraWakeTriggerLabel, "（模拟测试）")
+          putExtra(HotwordService.extraWakeTimeEpochMs, System.currentTimeMillis())
+        },
+    )
     return "测试已触发：已发送唤醒事件"
   }
 
