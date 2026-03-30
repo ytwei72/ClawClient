@@ -143,7 +143,7 @@ fun ChatMessageListCard(
         when (row) {
           is ChatListRow.Single -> ChatMessageBubble(message = row.message, assistantLabel = assistantLabel)
           is ChatListRow.AssistantTurn ->
-            ChatAssistantTurnBubble(messages = row.messages, assistantLabel = assistantLabel)
+            ChatAssistantTurnBubble(messages = row.messages)
         }
       }
     }

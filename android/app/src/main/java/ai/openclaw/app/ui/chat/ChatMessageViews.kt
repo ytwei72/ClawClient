@@ -69,30 +69,50 @@ private data class ChatBubbleStyle(
 private val numberedLineRegex = Regex("""^\d+[.)]\s+.*$""")
 private const val assistantCollapsedPreviewChars = 64
 
-/** 是否把该 content 的 type 并入 role 卡片标题（仅工具调用/结果；**保留网关下发的 type 原文**，不做互译或归一）。 */
+/**
+ * 是否把该 content 的 type 并入 role 卡片标题：**`trim` 后非空即纳入**，保留网关原文。
+ *
+ * 聊天 UI 里曾出现过、或解析分支里对照过的 `ChatMessageContent.type` 包括但不限于（网关可增删，未列出的 type 同样会进标题）：
+ * - **`text`**：正文 Markdown
+ * - **`image`**：常见于带 `base64` / `mimeType` 的图片块
+ * - **`thinking`** / **`reasoning`** / **`thought`**：推理类块
+ * - **`tool_call`** / **`toolcall`**：工具调用
+ * - **`tool_result`** / **`toolresult`**：工具结果
+ * - **其它任意字符串**：走 `AssistantMetaCard` 等默认展示的分支
+ */
 private fun toolPartTypeForRoleTitle(partType: String): String? {
   val raw = partType.trim()
-  if (raw.isEmpty()) return null
-  return when (raw.lowercase(Locale.US)) {
-    "tool_call", "toolcall", "tool_result", "toolresult" -> raw
-    else -> null
-  }
+  return raw.ifEmpty { null }
 }
 
-private fun assistantTurnRoleCardTitle(assistantLabel: String, messages: List<ChatMessage>): String {
-  val fromMessages = messages.map { it.role.trim().lowercase(Locale.US).ifEmpty { "?" } }
-  val fromContent =
-    messages.flatMap { msg ->
-      msg.content.mapNotNull { toolPartTypeForRoleTitle(it.type) }
-    }
-  val roles = (fromMessages + fromContent).distinct().sorted()
-  val roleSuffix =
-    when (roles.size) {
-      0 -> "assistant"
-      1 -> roles.first()
-      else -> roles.joinToString("+")
-    }
-  return "$assistantLabel:$roleSuffix"
+/**
+ * Role 卡片标题：**`[各消息 role 用 + 连接]: [各 part type 用 + 连接]`**（冒号后有一空格），不含 Agent 名。
+ * - **消息 role**：`user` 气泡仍单独用「你」，此处不处理；其余见 `ChatMessage.role`。
+ * - **part type**：见 `toolPartTypeForRoleTitle`。
+ * 两段各自去重（按不区分大小写合并写法）、组内字典序；无 part type 时仍为 `roles: `（冒号后保留一空格）。
+ */
+private fun roleCardTitle(messages: List<ChatMessage>): String {
+  if (messages.isEmpty()) return ": "
+
+  val messageRoles =
+    messages
+      .map { msg ->
+        val r = msg.role.trim()
+        if (r.isEmpty()) "?" else r
+      }
+      .distinctBy { it.lowercase(Locale.US) }
+
+  val partTypes =
+    messages
+      .flatMap { msg ->
+        msg.content.mapNotNull { toolPartTypeForRoleTitle(it.type) }
+      }
+      .distinctBy { it.lowercase(Locale.US) }
+
+  val cmp = compareBy<String> { it.lowercase(Locale.US) }
+  val rolesSegment = messageRoles.sortedWith(cmp).joinToString("+")
+  val typesSegment = partTypes.sortedWith(cmp).joinToString("+")
+  return "$rolesSegment: $typesSegment"
 }
 
 private fun ellipsizeOneLine(s: String, maxChars: Int = assistantCollapsedPreviewChars): String {
@@ -128,7 +148,13 @@ fun ChatMessageBubble(message: ChatMessage, assistantLabel: String) {
 
   if (displayableContent.isEmpty()) return
 
-  ChatBubbleContainer(style = style, roleLabel = roleLabel(role, assistantLabel), timestampMs = message.timestampMs) {
+  val roleLabelText =
+    when (role) {
+      "user" -> roleLabel(role, assistantLabel)
+      else -> roleCardTitle(listOf(message))
+    }
+
+  ChatBubbleContainer(style = style, roleLabel = roleLabelText, timestampMs = message.timestampMs) {
     ChatMessageBody(content = displayableContent, textColor = mobileText, role = role, messageId = message.id)
   }
 }
@@ -138,7 +164,7 @@ fun ChatMessageBubble(message: ChatMessage, assistantLabel: String) {
  * Each non-user content part has its own fold; there is no whole-turn collapse.
  */
 @Composable
-fun ChatAssistantTurnBubble(messages: List<ChatMessage>, assistantLabel: String) {
+fun ChatAssistantTurnBubble(messages: List<ChatMessage>) {
   if (messages.isEmpty()) return
 
   val withDisplayable =
@@ -163,7 +189,7 @@ fun ChatAssistantTurnBubble(messages: List<ChatMessage>, assistantLabel: String)
 
   ChatBubbleContainer(
     style = style,
-    roleLabel = assistantTurnRoleCardTitle(assistantLabel, messages),
+    roleLabel = roleCardTitle(messages),
     timestampMs = headerTime,
     headerTrailing =
       if (needsTurnFold) {
