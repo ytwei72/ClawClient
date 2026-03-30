@@ -207,7 +207,7 @@ private fun MediaStatusIndicators(
       imageVector = if (speakerEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
       contentDescription = if (speakerEnabled) "扬声器已开" else "扬声器已关",
       modifier = Modifier.size(20.dp),
-      tint = if (speakerEnabled) mobileTextSecondary else mobileDanger,
+      tint = if (speakerEnabled) mobileSuccess else mobileTextTertiary,
     )
   }
 }

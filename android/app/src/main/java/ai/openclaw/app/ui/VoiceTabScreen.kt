@@ -247,20 +247,20 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
             modifier = Modifier.size(48.dp),
             colors =
               IconButtonDefaults.iconButtonColors(
-                containerColor = if (speakerEnabled) mobileSurface else mobileDangerSoft,
+                containerColor = if (speakerEnabled) mobileSuccessSoft else mobileSurface,
               ),
           ) {
             Icon(
               imageVector = if (speakerEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
               contentDescription = if (speakerEnabled) "关闭扬声器" else "打开扬声器",
               modifier = Modifier.size(22.dp),
-              tint = if (speakerEnabled) mobileTextSecondary else mobileDanger,
+              tint = if (speakerEnabled) mobileSuccess else mobileTextTertiary,
             )
           }
           Text(
             if (speakerEnabled) "扬声器" else "已静音",
             style = mobileCaption2,
-            color = if (speakerEnabled) mobileTextTertiary else mobileDanger,
+            color = if (speakerEnabled) mobileSuccess else mobileTextTertiary,
           )
         }
 
@@ -277,7 +277,7 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
               modifier =
                 Modifier
                   .size(ringSize)
-                  .background(mobileAccent.copy(alpha = 0.12f + 0.14f * ringLevel), CircleShape),
+                  .background(mobileSuccess.copy(alpha = 0.12f + 0.14f * ringLevel), CircleShape),
             )
           }
           Button(
@@ -300,8 +300,14 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
             modifier = Modifier.size(60.dp),
             colors =
               ButtonDefaults.buttonColors(
-                containerColor = if (micCooldown) mobileTextSecondary else if (micEnabled) mobileDanger else mobileAccent,
-                contentColor = Color.White,
+                containerColor =
+                  when {
+                    micCooldown -> mobileTextSecondary
+                    micEnabled -> mobileSuccess
+                    else -> mobileSurfaceStrong
+                  },
+                contentColor =
+                  if (micEnabled || micCooldown) Color.White else mobileTextTertiary,
                 disabledContainerColor = mobileTextSecondary,
                 disabledContentColor = Color.White.copy(alpha = 0.5f),
               ),
