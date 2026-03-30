@@ -19,12 +19,64 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import ai.openclaw.app.chat.ChatMessage
 import ai.openclaw.app.chat.ChatPendingToolCall
+import java.util.Locale
 import ai.openclaw.app.ui.mobileBorder
 import ai.openclaw.app.ui.mobileCallout
 import ai.openclaw.app.ui.mobileCardSurface
 import ai.openclaw.app.ui.mobileHeadline
 import ai.openclaw.app.ui.mobileText
 import ai.openclaw.app.ui.mobileTextSecondary
+
+private sealed class ChatListRow {
+  data class Single(val message: ChatMessage) : ChatListRow()
+
+  data class AssistantTurn(val messages: List<ChatMessage>) : ChatListRow()
+}
+
+/**
+ * [messagesOldestFirst] is stored gateway order. One assistant "round" is everything until the next **user**
+ * message: all consecutive `assistant` rows **and** any `system` rows the gateway inserts between them
+ * (tool status, etc.). Previously we flushed on every non-assistant, which split one user turn into many
+ * one-line bubbles that each looked like a separate fold.
+ */
+private fun groupMessagesForChatList(messagesOldestFirst: List<ChatMessage>): List<ChatListRow> {
+  if (messagesOldestFirst.isEmpty()) return emptyList()
+  val rowsChrono = mutableListOf<ChatListRow>()
+  var turnBuffer = mutableListOf<ChatMessage>()
+
+  fun flushTurn() {
+    if (turnBuffer.isEmpty()) return
+    val onlySystem =
+      turnBuffer.all { it.role.trim().lowercase(Locale.US) == "system" }
+    if (onlySystem) {
+      for (m in turnBuffer) rowsChrono.add(ChatListRow.Single(m))
+    } else {
+      rowsChrono.add(ChatListRow.AssistantTurn(turnBuffer.toList()))
+    }
+    turnBuffer = mutableListOf()
+  }
+
+  for (msg in messagesOldestFirst) {
+    val role = msg.role.trim().lowercase(Locale.US)
+    when (role) {
+      "user" -> {
+        flushTurn()
+        rowsChrono.add(ChatListRow.Single(msg))
+      }
+      "assistant",
+      "system",
+      "model",
+      -> turnBuffer.add(msg)
+
+      else -> {
+        flushTurn()
+        rowsChrono.add(ChatListRow.Single(msg))
+      }
+    }
+  }
+  flushTurn()
+  return rowsChrono.asReversed()
+}
 
 @Composable
 fun ChatMessageListCard(
@@ -37,12 +89,12 @@ fun ChatMessageListCard(
   modifier: Modifier = Modifier,
 ) {
   val listState = rememberLazyListState()
-  val displayMessages = remember(messages) { messages.asReversed() }
+  val listRows = remember(messages) { groupMessagesForChatList(messages) }
   val stream = streamingAssistantText?.trim()
 
   // New list items/tool rows should animate into view, but token streaming should not restart
   // that animation on every delta.
-  LaunchedEffect(messages.size, pendingRunCount, pendingToolCalls.size) {
+  LaunchedEffect(messages.size, listRows.size, pendingRunCount, pendingToolCalls.size) {
     listState.animateScrollToItem(index = 0)
   }
   LaunchedEffect(stream) {
@@ -79,8 +131,20 @@ fun ChatMessageListCard(
         }
       }
 
-      items(items = displayMessages, key = { it.id }) { message ->
-        ChatMessageBubble(message = message, assistantLabel = assistantLabel)
+      items(
+        items = listRows,
+        key = { row ->
+          when (row) {
+            is ChatListRow.Single -> row.message.id
+            is ChatListRow.AssistantTurn -> row.messages.joinToString(separator = ":") { it.id }
+          }
+        },
+      ) { row ->
+        when (row) {
+          is ChatListRow.Single -> ChatMessageBubble(message = row.message, assistantLabel = assistantLabel)
+          is ChatListRow.AssistantTurn ->
+            ChatAssistantTurnBubble(messages = row.messages, assistantLabel = assistantLabel)
+        }
       }
     }
 

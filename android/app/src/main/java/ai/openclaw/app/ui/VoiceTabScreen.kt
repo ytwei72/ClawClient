@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -45,7 +44,6 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -67,7 +65,6 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -166,46 +163,16 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
       pendingMicEnable = false
     }
 
+  // 仅在有对话或思考气泡时滚到最新一轮，避免抢跑整张列表
   LaunchedEffect(micConversation.size, showThinkingBubble) {
-    val total = micConversation.size + if (showThinkingBubble) 1 else 0
-    if (total > 0) {
-      listState.animateScrollToItem(total - 1)
-    }
+    if (micConversation.isEmpty() && !showThinkingBubble) return@LaunchedEffect
+    val lastConvIndex = micConversation.size + if (showThinkingBubble) 1 else 0
+    listState.animateScrollToItem(lastConvIndex)
   }
 
-  Column(
-    modifier =
-      Modifier
-        .fillMaxSize()
-        .background(mobileBackgroundGradient)
-        .imePadding()
-        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
-        .padding(horizontal = 20.dp, vertical = 14.dp),
-    verticalArrangement = Arrangement.spacedBy(10.dp),
-  ) {
-    LazyColumn(
-      state = listState,
-      modifier = Modifier.fillMaxWidth().weight(1f),
-      contentPadding = PaddingValues(vertical = 4.dp),
-      verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-      item {
-        VoiceWakeHotwordSection(viewModel = viewModel)
-      }
-
-      items(items = micConversation, key = { it.id }) { entry ->
-        VoiceTurnBubble(entry = entry)
-      }
-
-      if (showThinkingBubble) {
-        item {
-          VoiceThinkingBubble()
-        }
-      }
-    }
-
-    val queueCount = micQueuedMessages.size
-    val asrStateLine =
+  val queueCount = micQueuedMessages.size
+  val asrStateLine =
+    remember(queueCount, micIsSending, micCooldown, micEnabled) {
       when {
         queueCount > 0 -> "$queueCount 条排队"
         micIsSending -> "发送中"
@@ -213,23 +180,43 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
         micEnabled -> "聆听中"
         else -> "麦克风关"
       }
-
-    val onMicMainClick: () -> Unit = l@{
-      if (micCooldown) return@l
-      if (micEnabled) {
-        viewModel.setMicEnabled(false)
-      } else if (hasMicPermission) {
-        viewModel.setMicEnabled(true)
-      } else {
-        pendingMicEnable = true
-        requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
-      }
     }
 
-    Column(
-      modifier = Modifier.fillMaxWidth(),
-      verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
+  val onMicMainClick: () -> Unit = l@{
+    if (micCooldown) return@l
+    if (micEnabled) {
+      viewModel.setMicEnabled(false)
+    } else if (hasMicPermission) {
+      viewModel.setMicEnabled(true)
+    } else {
+      pendingMicEnable = true
+      requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+  }
+
+  LazyColumn(
+    state = listState,
+    modifier =
+      Modifier
+        .fillMaxSize()
+        .background(mobileBackgroundGradient)
+        .imePadding()
+        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)),
+    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
+    verticalArrangement = Arrangement.spacedBy(10.dp),
+  ) {
+    item {
+      VoiceWakeHotwordSection(viewModel = viewModel)
+    }
+    items(items = micConversation, key = { it.id }) { entry ->
+      VoiceTurnBubble(entry = entry)
+    }
+    if (showThinkingBubble) {
+      item {
+        VoiceThinkingBubble()
+      }
+    }
+    item {
       VoiceAsrControlCard(
         micEnabled = micEnabled,
         micCooldown = micCooldown,
@@ -246,37 +233,45 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
         onMicClick = onMicMainClick,
         hasMicPermission = hasMicPermission,
       )
-
+    }
+    item {
       VoiceTtsControlCard(
         speakerEnabled = speakerEnabled,
         onSpeakerToggle = { viewModel.setSpeakerEnabled(!speakerEnabled) },
         samplePhrases = VOICE_TTS_SAMPLE_PHRASES,
         onSpeakSample = { viewModel.speakVoiceTtsSample(it) },
       )
-
-      if (!hasMicPermission) {
+    }
+    if (!hasMicPermission) {
+      item {
         val showRationale =
           if (activity == null) {
             false
           } else {
             ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.RECORD_AUDIO)
           }
-        Text(
-          if (showRationale) {
-            "语音模式需要麦克风权限。"
-          } else {
-            "麦克风不可用。请在系统设置中开启。"
-          },
-          style = mobileCaption1,
-          color = mobileWarning,
-          textAlign = TextAlign.Center,
-        )
-        Button(
-          onClick = { openAppSettings(context) },
-          shape = RoundedCornerShape(12.dp),
-          colors = ButtonDefaults.buttonColors(containerColor = mobileSurfaceStrong, contentColor = mobileText),
+        Column(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-          Text("打开设置", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
+          Text(
+            if (showRationale) {
+              "语音模式需要麦克风权限。"
+            } else {
+              "麦克风不可用。请在系统设置中开启。"
+            },
+            style = mobileCaption1,
+            color = mobileWarning,
+            textAlign = TextAlign.Center,
+          )
+          Button(
+            onClick = { openAppSettings(context) },
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = mobileSurfaceStrong, contentColor = mobileText),
+          ) {
+            Text("打开设置", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
+          }
         }
       }
     }
@@ -408,6 +403,7 @@ private fun VoiceAsrControlCard(
   }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun VoiceTtsControlCard(
   speakerEnabled: Boolean,
@@ -416,6 +412,9 @@ private fun VoiceTtsControlCard(
   onSpeakSample: (String) -> Unit,
 ) {
   var selectedSampleIndex by remember(samplePhrases) { mutableStateOf(0) }
+  var phraseMenuExpanded by remember { mutableStateOf(false) }
+  val displayPhrase =
+    samplePhrases.getOrNull(selectedSampleIndex).orEmpty().ifEmpty { samplePhrases.firstOrNull().orEmpty() }
 
   Surface(
     modifier = Modifier.fillMaxWidth(),
@@ -465,47 +464,49 @@ private fun VoiceTtsControlCard(
         }
       }
       Text(
-        "下列为试听用语，任选其一后点播放，仅用于试听合成效果，不会朗读助手对话里的回复。",
+        "试听与助手对话无关。点选下方框可更换语句，再播放试听合成效果。",
         style = mobileCallout,
         color = mobileTextTertiary,
       )
-      Column(
-        modifier =
-          Modifier
-            .fillMaxWidth()
-            .heightIn(max = 220.dp)
-            .border(1.dp, mobileBorder.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
-            .background(mobileSurfaceStrong, RoundedCornerShape(12.dp))
-            .padding(vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(0.dp),
+      ExposedDropdownMenuBox(
+        expanded = phraseMenuExpanded,
+        onExpandedChange = { phraseMenuExpanded = it },
+        modifier = Modifier.fillMaxWidth(),
       ) {
-        samplePhrases.forEachIndexed { index, phrase ->
-          Row(
-            modifier =
-              Modifier
-                .fillMaxWidth()
-                .clickable { selectedSampleIndex = index }
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-          ) {
-            RadioButton(
-              selected = selectedSampleIndex == index,
-              onClick = { selectedSampleIndex = index },
-            )
-            Text(
-              "${index + 1}. $phrase",
-              style = mobileCaption1,
-              color = mobileText,
-              maxLines = 3,
-              overflow = TextOverflow.Ellipsis,
-              modifier = Modifier.weight(1f),
-            )
-          }
-          if (index < samplePhrases.lastIndex) {
-            HorizontalDivider(
-              modifier = Modifier.padding(start = 48.dp, end = 10.dp),
-              color = mobileBorder.copy(alpha = 0.45f),
+        OutlinedTextField(
+          value = displayPhrase,
+          onValueChange = {},
+          readOnly = true,
+          label = { Text("当前试听语句", style = mobileCaption1, color = mobileTextSecondary) },
+          modifier =
+            Modifier
+              .menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = true)
+              .fillMaxWidth(),
+          textStyle = mobileBody.copy(color = mobileText),
+          colors = voiceSettingsTextFieldColors(),
+          trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = phraseMenuExpanded) },
+          minLines = 2,
+          maxLines = 4,
+        )
+        DropdownMenu(
+          expanded = phraseMenuExpanded,
+          onDismissRequest = { phraseMenuExpanded = false },
+          modifier = Modifier.heightIn(max = 280.dp),
+        ) {
+          samplePhrases.forEachIndexed { index, phrase ->
+            DropdownMenuItem(
+              text = {
+                Text(
+                  "${index + 1}. $phrase",
+                  style = mobileCallout,
+                  maxLines = 3,
+                  overflow = TextOverflow.Ellipsis,
+                )
+              },
+              onClick = {
+                phraseMenuExpanded = false
+                selectedSampleIndex = index
+              },
             )
           }
         }
@@ -531,7 +532,7 @@ private fun VoiceTtsControlCard(
           modifier = Modifier.size(20.dp),
         )
         Spacer(modifier = Modifier.width(8.dp))
-        Text("播放所选语句", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
+        Text("播放当前语句", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
       }
       if (!speakerEnabled) {
         Text(

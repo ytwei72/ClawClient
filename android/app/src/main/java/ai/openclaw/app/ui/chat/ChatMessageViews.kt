@@ -5,7 +5,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -65,8 +67,53 @@ private data class ChatBubbleStyle(
 )
 
 private val numberedLineRegex = Regex("""^\d+[.)]\s+.*$""")
-private const val assistantTextPreviewChars = 420
-private const val assistantMetaPreviewChars = 240
+private const val assistantCollapsedPreviewChars = 64
+
+/** 是否把该 content 的 type 并入 role 卡片标题（仅工具调用/结果；**保留网关下发的 type 原文**，不做互译或归一）。 */
+private fun toolPartTypeForRoleTitle(partType: String): String? {
+  val raw = partType.trim()
+  if (raw.isEmpty()) return null
+  return when (raw.lowercase(Locale.US)) {
+    "tool_call", "toolcall", "tool_result", "toolresult" -> raw
+    else -> null
+  }
+}
+
+private fun assistantTurnRoleCardTitle(assistantLabel: String, messages: List<ChatMessage>): String {
+  val fromMessages = messages.map { it.role.trim().lowercase(Locale.US).ifEmpty { "?" } }
+  val fromContent =
+    messages.flatMap { msg ->
+      msg.content.mapNotNull { toolPartTypeForRoleTitle(it.type) }
+    }
+  val roles = (fromMessages + fromContent).distinct().sorted()
+  val roleSuffix =
+    when (roles.size) {
+      0 -> "assistant"
+      1 -> roles.first()
+      else -> roles.joinToString("+")
+    }
+  return "$assistantLabel:$roleSuffix"
+}
+
+private fun ellipsizeOneLine(s: String, maxChars: Int = assistantCollapsedPreviewChars): String {
+  val single = s.replace(Regex("\\s+"), " ").trim()
+  if (single.isEmpty()) return ""
+  return if (single.length <= maxChars) single else single.take(maxChars) + "…"
+}
+
+private fun plainContentOneLineSummary(part: ChatMessageContent): String {
+  val type = part.type.trim().lowercase(Locale.US)
+  if (part.base64 != null && (type == "image" || part.mimeType?.startsWith("image/") == true)) {
+    return "图片附件"
+  }
+  part.text?.trim()?.takeIf { it.isNotEmpty() }?.let { return ellipsizeOneLine(it) }
+  part.fileName?.takeIf { it.isNotBlank() }?.let { return ellipsizeOneLine("file=$it") }
+  part.mimeType?.takeIf { it.isNotBlank() }?.let { return ellipsizeOneLine(it) }
+  if (part.base64 != null) {
+    return "附件·base64Len=${part.base64.length}"
+  }
+  return "（空）"
+}
 
 @Composable
 fun ChatMessageBubble(message: ChatMessage, assistantLabel: String) {
@@ -86,12 +133,92 @@ fun ChatMessageBubble(message: ChatMessage, assistantLabel: String) {
   }
 }
 
+/**
+ * One assistant "turn": rows after the same user message (incl. `system` in between). [messages] is oldest → newest.
+ * Each non-user content part has its own fold; there is no whole-turn collapse.
+ */
+@Composable
+fun ChatAssistantTurnBubble(messages: List<ChatMessage>, assistantLabel: String) {
+  if (messages.isEmpty()) return
+
+  val withDisplayable =
+    remember(messages) {
+      messages.mapNotNull { msg ->
+        val parts =
+          msg.content.filter { part ->
+            part.base64 != null || !part.text.isNullOrBlank()
+          }
+        if (parts.isEmpty()) null else msg to parts
+      }
+    }
+
+  if (withDisplayable.isEmpty()) return
+
+  val style = bubbleStyle("assistant")
+  val headerTime = withDisplayable.last().first.timestampMs
+  val turnFoldKey = remember(messages) { messages.joinToString(":") { it.id } }
+  val totalParts = withDisplayable.sumOf { it.second.size }
+  val needsTurnFold = withDisplayable.size > 1 || totalParts > 1
+  var turnExpanded by rememberSaveable(turnFoldKey) { mutableStateOf(true) }
+
+  ChatBubbleContainer(
+    style = style,
+    roleLabel = assistantTurnRoleCardTitle(assistantLabel, messages),
+    timestampMs = headerTime,
+    headerTrailing =
+      if (needsTurnFold) {
+        {
+          TextButton(
+            onClick = { turnExpanded = !turnExpanded },
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+          ) {
+            Text(
+              if (turnExpanded) "收起回合" else "展开回合",
+              style = mobileCaption1,
+              color = mobileAccent,
+            )
+          }
+        }
+      } else {
+        null
+      },
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth(),
+      verticalArrangement = Arrangement.spacedBy(if (turnExpanded) 10.dp else 4.dp),
+    ) {
+      for ((index, chunk) in withDisplayable.withIndex()) {
+        val (msg, displayable) = chunk
+        if (turnExpanded && withDisplayable.size > 1) {
+          Text(
+            text =
+              "分段 ${index + 1}/${withDisplayable.size}  ·  message.role=${msg.role.trim().ifEmpty { "?" }}  ·  id=${msg.id}",
+            style = mobileCaption2,
+            color = mobileAccent.copy(alpha = 0.85f),
+            fontFamily = FontFamily.Monospace,
+          )
+        }
+        val bodyRole = msg.role.trim().ifEmpty { "assistant" }
+        ChatMessageBody(
+          content = displayable,
+          textColor = mobileText,
+          role = bodyRole,
+          messageId = msg.id,
+          assistantPartCollapse = true,
+          compactSingleLine = !turnExpanded,
+        )
+      }
+    }
+  }
+}
+
 @Composable
 private fun ChatBubbleContainer(
   style: ChatBubbleStyle,
   roleLabel: String,
   timestampMs: Long?,
   modifier: Modifier = Modifier,
+  headerTrailing: (@Composable RowScope.() -> Unit)? = null,
   content: @Composable () -> Unit,
 ) {
   Row(
@@ -123,12 +250,18 @@ private fun ChatBubbleContainer(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false),
           )
-          timestampMs?.let {
-            Text(
-              text = formatMessageTime(it),
-              style = mobileCaption2,
-              color = mobileTextSecondary,
-            )
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            headerTrailing?.invoke(this)
+            timestampMs?.let {
+              Text(
+                text = formatMessageTime(it),
+                style = mobileCaption2,
+                color = mobileTextSecondary,
+              )
+            }
           }
         }
         content()
@@ -138,35 +271,49 @@ private fun ChatBubbleContainer(
 }
 
 @Composable
-private fun ChatMessageBody(content: List<ChatMessageContent>, textColor: Color, role: String, messageId: String) {
-  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun ChatMessageBody(
+  content: List<ChatMessageContent>,
+  textColor: Color,
+  role: String,
+  messageId: String,
+  /** Long non-user parts use 收起/展开；user 消息不受影响。 */
+  assistantPartCollapse: Boolean = true,
+  /** 最外层回合折叠时，每块类型卡片仅用一行摘要展示。 */
+  compactSingleLine: Boolean = false,
+) {
+  val isUser = role.trim().equals("user", ignoreCase = true)
+
+  Column(verticalArrangement = Arrangement.spacedBy(if (compactSingleLine) 4.dp else 8.dp)) {
     for ((idx, part) in content.withIndex()) {
-      when (part.type) {
+      val partType = part.type.trim().lowercase(Locale.US)
+      when (partType) {
         "text" -> {
           val text = part.text ?: continue
-          if (role == "user") {
+          if (isUser) {
             UserTextWithDebugToggle(rawText = text, textColor = textColor, stateKey = "$messageId:$idx")
-          } else if (role == "assistant") {
+          } else {
             AssistantTextCard(
-              title = assistantTypeLabel(part.type),
+              rawContentType = part.type,
               text = text,
               textColor = textColor,
               stateKey = "$messageId:$idx:text",
+              collapseLongText = assistantPartCollapse,
+              compactSingleLine = compactSingleLine,
             )
-          } else {
-            ChatMarkdown(text = text, textColor = textColor)
           }
         }
         else -> {
-          if (role == "assistant") {
+          if (isUser) {
+            val b64 = part.base64 ?: continue
+            ChatBase64Image(base64 = b64, mimeType = part.mimeType)
+          } else {
             AssistantTypedContentCard(
               part = part,
               textColor = textColor,
               stateKey = "$messageId:$idx:${part.type}",
+              collapseLongText = assistantPartCollapse,
+              compactSingleLine = compactSingleLine,
             )
-          } else {
-            val b64 = part.base64 ?: continue
-            ChatBase64Image(base64 = b64, mimeType = part.mimeType)
           }
         }
       }
@@ -197,25 +344,62 @@ private fun UserTextWithDebugToggle(rawText: String, textColor: Color, stateKey:
   }
 }
 
+/** 类型卡片标题：展示网关 content 的 `type` 原文（仅 trim）。 */
 @Composable
-private fun AssistantTextCard(title: String, text: String, textColor: Color, stateKey: String) {
-  var expanded by rememberSaveable(stateKey) { mutableStateOf(false) }
-  val needsCollapse = text.length > assistantTextPreviewChars
-  val display = if (needsCollapse && !expanded) text.take(assistantTextPreviewChars) + "…" else text
+private fun AgentContentTypeHeader(rawContentType: String) {
+  val t = rawContentType.trim().ifEmpty { "?" }
+  Text(
+    text = t,
+    style = mobileCaption2,
+    color = mobileTextSecondary,
+    fontFamily = FontFamily.Monospace,
+  )
+}
 
+@Composable
+private fun AssistantTextCard(
+  rawContentType: String,
+  text: String,
+  textColor: Color,
+  stateKey: String,
+  collapseLongText: Boolean = true,
+  compactSingleLine: Boolean = false,
+) {
   Surface(
     shape = RoundedCornerShape(10.dp),
     border = BorderStroke(1.dp, mobileBorder),
     color = mobileCardSurface.copy(alpha = 0.7f),
   ) {
     Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-      if (title != "文本") {
-        Text(title, style = mobileCaption2, color = mobileTextSecondary)
-      }
-      ChatMarkdown(text = display, textColor = textColor)
-      if (needsCollapse) {
-        TextButton(onClick = { expanded = !expanded }) {
-          Text(if (expanded) "收起" else "展开查看全部", style = mobileCaption1, color = mobileAccent)
+      AgentContentTypeHeader(rawContentType = rawContentType)
+      if (compactSingleLine) {
+        Text(
+          ellipsizeOneLine(text),
+          style = mobileCallout,
+          color = textColor,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+      } else {
+        if (text.contains("```")) {
+          Text(
+            text = "· 含 ``` 围栏：代码块等为 Markdown 子渲染，仍为同一 text part，无独立 type",
+            style = mobileCaption2,
+            color = mobileTextSecondary.copy(alpha = 0.88f),
+          )
+        }
+        if (!collapseLongText) {
+          ChatMarkdown(text = text, textColor = textColor)
+        } else {
+          var expanded by rememberSaveable(stateKey) { mutableStateOf(false) }
+          val needsCollapse = text.length > assistantCollapsedPreviewChars
+          val display = if (needsCollapse && !expanded) text.take(assistantCollapsedPreviewChars) + "…" else text
+          ChatMarkdown(text = display, textColor = textColor)
+          if (needsCollapse) {
+            TextButton(onClick = { expanded = !expanded }) {
+              Text(if (expanded) "收起" else "展开查看全部", style = mobileCaption1, color = mobileAccent)
+            }
+          }
         }
       }
     }
@@ -223,7 +407,13 @@ private fun AssistantTextCard(title: String, text: String, textColor: Color, sta
 }
 
 @Composable
-private fun AssistantTypedContentCard(part: ChatMessageContent, textColor: Color, stateKey: String) {
+private fun AssistantTypedContentCard(
+  part: ChatMessageContent,
+  textColor: Color,
+  stateKey: String,
+  collapseLongText: Boolean = true,
+  compactSingleLine: Boolean = false,
+) {
   val type = part.type.trim().lowercase(Locale.US)
   if (part.base64 != null && (type == "image" || part.mimeType?.startsWith("image/") == true)) {
     Surface(
@@ -232,8 +422,31 @@ private fun AssistantTypedContentCard(part: ChatMessageContent, textColor: Color
       color = mobileCardSurface.copy(alpha = 0.7f),
     ) {
       Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("图片", style = mobileCaption2, color = mobileTextSecondary)
-        ChatBase64Image(base64 = part.base64, mimeType = part.mimeType)
+        AgentContentTypeHeader(rawContentType = part.type)
+        if (compactSingleLine) {
+          Text(
+            plainContentOneLineSummary(part),
+            style = mobileCallout,
+            color = mobileTextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        } else if (!collapseLongText) {
+          ChatBase64Image(base64 = part.base64, mimeType = part.mimeType)
+        } else {
+          var imageExpanded by rememberSaveable(stateKey) { mutableStateOf(true) }
+          if (imageExpanded) {
+            ChatBase64Image(base64 = part.base64, mimeType = part.mimeType)
+            TextButton(onClick = { imageExpanded = false }) {
+              Text("收起图片", style = mobileCaption1, color = mobileAccent)
+            }
+          } else {
+            Text("（图片已折叠）", style = mobileCaption2, color = mobileTextSecondary)
+            TextButton(onClick = { imageExpanded = true }) {
+              Text("展开图片", style = mobileCaption1, color = mobileAccent)
+            }
+          }
+        }
       }
     }
     return
@@ -241,34 +454,44 @@ private fun AssistantTypedContentCard(part: ChatMessageContent, textColor: Color
 
   when (type) {
     "thinking", "reasoning", "thought" -> {
-      AssistantReasoningCard(part = part, textColor = textColor, stateKey = stateKey)
+      AssistantReasoningCard(
+        part = part,
+        textColor = textColor,
+        stateKey = stateKey,
+        collapseLongText = collapseLongText,
+        compactSingleLine = compactSingleLine,
+      )
     }
     "tool_call", "toolcall", "tool_result", "toolresult" -> {
-      AssistantToolCard(part = part, textColor = textColor, stateKey = stateKey)
+      AssistantToolCard(
+        part = part,
+        textColor = textColor,
+        stateKey = stateKey,
+        collapseLongText = collapseLongText,
+        compactSingleLine = compactSingleLine,
+      )
     }
     else -> {
-      AssistantMetaCard(part = part, textColor = textColor, stateKey = stateKey)
+      AssistantMetaCard(
+        part = part,
+        textColor = textColor,
+        stateKey = stateKey,
+        collapseLongText = collapseLongText,
+        compactSingleLine = compactSingleLine,
+      )
     }
-  }
-}
-
-private fun assistantTypeLabel(type: String): String {
-  return when (type.trim().lowercase(Locale.US)) {
-    "text" -> "文本"
-    "image" -> "图片"
-    "tool_call", "toolcall" -> "工具调用"
-    "tool_result", "toolresult" -> "工具结果"
-    "thinking", "reasoning", "thought" -> "思考"
-    else -> "内容 · $type"
   }
 }
 
 @Composable
-private fun AssistantReasoningCard(part: ChatMessageContent, textColor: Color, stateKey: String) {
-  var expanded by rememberSaveable(stateKey) { mutableStateOf(false) }
+private fun AssistantReasoningCard(
+  part: ChatMessageContent,
+  textColor: Color,
+  stateKey: String,
+  collapseLongText: Boolean = true,
+  compactSingleLine: Boolean = false,
+) {
   val raw = part.text?.trim().orEmpty().ifEmpty { "(empty reasoning)" }
-  val needsCollapse = raw.length > assistantMetaPreviewChars
-  val display = if (needsCollapse && !expanded) raw.take(assistantMetaPreviewChars) + "…" else raw
 
   Surface(
     shape = RoundedCornerShape(10.dp),
@@ -279,11 +502,26 @@ private fun AssistantReasoningCard(part: ChatMessageContent, textColor: Color, s
       modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
       verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-      Text("思考", style = mobileCaption2, color = mobileTextSecondary)
-      Text(display, style = mobileCallout.copy(fontFamily = FontFamily.Monospace), color = mobileTextSecondary)
-      if (needsCollapse) {
-        TextButton(onClick = { expanded = !expanded }) {
-          Text(if (expanded) "收起" else "展开查看全部", style = mobileCaption1, color = mobileAccent)
+      AgentContentTypeHeader(rawContentType = part.type)
+      if (compactSingleLine) {
+        Text(
+          plainContentOneLineSummary(part.copy(text = raw)),
+          style = mobileCallout.copy(fontFamily = FontFamily.Monospace),
+          color = mobileTextSecondary,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+      } else if (!collapseLongText) {
+        Text(raw, style = mobileCallout.copy(fontFamily = FontFamily.Monospace), color = mobileTextSecondary)
+      } else {
+        var expanded by rememberSaveable(stateKey) { mutableStateOf(false) }
+        val needsCollapse = raw.length > assistantCollapsedPreviewChars
+        val display = if (needsCollapse && !expanded) raw.take(assistantCollapsedPreviewChars) + "…" else raw
+        Text(display, style = mobileCallout.copy(fontFamily = FontFamily.Monospace), color = mobileTextSecondary)
+        if (needsCollapse) {
+          TextButton(onClick = { expanded = !expanded }) {
+            Text(if (expanded) "收起" else "展开查看全部", style = mobileCaption1, color = mobileAccent)
+          }
         }
       }
     }
@@ -291,9 +529,13 @@ private fun AssistantReasoningCard(part: ChatMessageContent, textColor: Color, s
 }
 
 @Composable
-private fun AssistantToolCard(part: ChatMessageContent, textColor: Color, stateKey: String) {
-  var expanded by rememberSaveable(stateKey) { mutableStateOf(false) }
-  val label = assistantTypeLabel(part.type)
+private fun AssistantToolCard(
+  part: ChatMessageContent,
+  textColor: Color,
+  stateKey: String,
+  collapseLongText: Boolean = true,
+  compactSingleLine: Boolean = false,
+) {
   val rawText = part.text?.trim()
   val pretty = rawText?.let(::tryPrettyJson)
   val body = pretty ?: rawText
@@ -318,8 +560,6 @@ private fun AssistantToolCard(part: ChatMessageContent, textColor: Color, stateK
         append(part.type.ifBlank { "unknown" })
         part.base64?.let { append("\ncontent(base64Len)=" + it.length) }
       }
-  val needsCollapse = contentRaw.length > assistantTextPreviewChars
-  val contentDisplay = if (needsCollapse && !expanded) contentRaw.take(assistantTextPreviewChars) + "…" else contentRaw
 
   Surface(
     shape = RoundedCornerShape(10.dp),
@@ -330,12 +570,32 @@ private fun AssistantToolCard(part: ChatMessageContent, textColor: Color, stateK
       modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
       verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-      Text(label, style = mobileCaption2, color = mobileTextSecondary)
-      meta?.let { Text(it, style = mobileCaption1, color = mobileTextSecondary, fontFamily = FontFamily.Monospace) }
-      ChatMarkdown(text = "```json\n$contentDisplay\n```", textColor = textColor)
-      if (needsCollapse) {
-        TextButton(onClick = { expanded = !expanded }) {
-          Text(if (expanded) "收起" else "展开查看全部", style = mobileCaption1, color = mobileAccent)
+      AgentContentTypeHeader(rawContentType = part.type)
+      if (compactSingleLine) {
+        val line = (meta?.let { "$it · " }.orEmpty()) + ellipsizeOneLine(contentRaw)
+        Text(
+          line,
+          style = mobileCallout,
+          color = mobileTextSecondary,
+          fontFamily = FontFamily.Monospace,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+      } else {
+        meta?.let { Text(it, style = mobileCaption1, color = mobileTextSecondary, fontFamily = FontFamily.Monospace) }
+        if (!collapseLongText) {
+          ChatMarkdown(text = "```json\n$contentRaw\n```", textColor = textColor)
+        } else {
+          var expanded by rememberSaveable(stateKey) { mutableStateOf(false) }
+          val needsCollapse = contentRaw.length > assistantCollapsedPreviewChars
+          val contentDisplay =
+            if (needsCollapse && !expanded) contentRaw.take(assistantCollapsedPreviewChars) + "…" else contentRaw
+          ChatMarkdown(text = "```json\n$contentDisplay\n```", textColor = textColor)
+          if (needsCollapse) {
+            TextButton(onClick = { expanded = !expanded }) {
+              Text(if (expanded) "收起" else "展开查看全部", style = mobileCaption1, color = mobileAccent)
+            }
+          }
         }
       }
     }
@@ -343,8 +603,13 @@ private fun AssistantToolCard(part: ChatMessageContent, textColor: Color, stateK
 }
 
 @Composable
-private fun AssistantMetaCard(part: ChatMessageContent, textColor: Color, stateKey: String) {
-  var expanded by rememberSaveable(stateKey) { mutableStateOf(false) }
+private fun AssistantMetaCard(
+  part: ChatMessageContent,
+  textColor: Color,
+  stateKey: String,
+  collapseLongText: Boolean = true,
+  compactSingleLine: Boolean = false,
+) {
   val metaRaw =
     buildString {
       append("type=")
@@ -354,9 +619,6 @@ private fun AssistantMetaCard(part: ChatMessageContent, textColor: Color, stateK
       part.fileName?.takeIf { it.isNotBlank() }?.let { append("\nfile=" + it) }
       part.base64?.let { append("\ncontent(base64Len)=" + it.length) }
     }
-  val needsCollapse = metaRaw.length > assistantMetaPreviewChars
-  val metaDisplay =
-    if (needsCollapse && !expanded) metaRaw.take(assistantMetaPreviewChars) + "…" else metaRaw
 
   Surface(
     shape = RoundedCornerShape(10.dp),
@@ -364,11 +626,28 @@ private fun AssistantMetaCard(part: ChatMessageContent, textColor: Color, stateK
     color = mobileCodeBg.copy(alpha = 0.55f),
   ) {
     Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-      Text(assistantTypeLabel(part.type), style = mobileCaption2, color = mobileTextSecondary)
-      ChatMarkdown(text = "```text\n$metaDisplay\n```", textColor = textColor)
-      if (needsCollapse) {
-        TextButton(onClick = { expanded = !expanded }) {
-          Text(if (expanded) "收起" else "展开查看全部", style = mobileCaption1, color = mobileAccent)
+      AgentContentTypeHeader(rawContentType = part.type)
+      if (compactSingleLine) {
+        Text(
+          ellipsizeOneLine(metaRaw.replace("\n", " ")),
+          style = mobileCallout,
+          color = mobileTextSecondary,
+          fontFamily = FontFamily.Monospace,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+      } else if (!collapseLongText) {
+        ChatMarkdown(text = "```text\n$metaRaw\n```", textColor = textColor)
+      } else {
+        var expanded by rememberSaveable(stateKey) { mutableStateOf(false) }
+        val needsCollapse = metaRaw.length > assistantCollapsedPreviewChars
+        val metaDisplay =
+          if (needsCollapse && !expanded) metaRaw.take(assistantCollapsedPreviewChars) + "…" else metaRaw
+        ChatMarkdown(text = "```text\n$metaDisplay\n```", textColor = textColor)
+        if (needsCollapse) {
+          TextButton(onClick = { expanded = !expanded }) {
+            Text(if (expanded) "收起" else "展开查看全部", style = mobileCaption1, color = mobileAccent)
+          }
         }
       }
     }
@@ -438,12 +717,20 @@ fun ChatTypingIndicatorBubble(assistantLabel: String) {
     roleLabel = roleLabel("assistant", assistantLabel),
     timestampMs = null,
   ) {
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-      DotPulse(color = mobileTextSecondary)
-      Text("思考中…", style = mobileCallout, color = mobileTextSecondary)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+      Text(
+        text = "assistant：typing",
+        style = mobileCaption2,
+        color = mobileTextSecondary,
+        fontFamily = FontFamily.Monospace,
+      )
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        DotPulse(color = mobileTextSecondary)
+        Text("思考中…", style = mobileCallout, color = mobileTextSecondary)
+      }
     }
   }
 }
@@ -462,6 +749,12 @@ fun ChatPendingToolsBubble(toolCalls: List<ChatPendingToolCall>, assistantLabel:
     timestampMs = null,
   ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      Text(
+        text = "assistant：tools_pending",
+        style = mobileCaption2,
+        color = mobileTextSecondary,
+        fontFamily = FontFamily.Monospace,
+      )
       Text("正在运行工具…", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
       for (display in displays.take(6)) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -499,7 +792,15 @@ fun ChatStreamingAssistantBubble(text: String, assistantLabel: String) {
     roleLabel = "$assistantLabel · 实时",
     timestampMs = null,
   ) {
-    ChatMarkdown(text = text, textColor = mobileText)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+      Text(
+        text = "assistant：stream",
+        style = mobileCaption2,
+        color = mobileTextSecondary,
+        fontFamily = FontFamily.Monospace,
+      )
+      ChatMarkdown(text = text, textColor = mobileText)
+    }
   }
 }
 
