@@ -91,8 +91,20 @@ private val markdownParser: Parser by lazy {
     .build()
 }
 
+/** 围栏/缩进代码块在 Markdown 中的配色；为 null 时使用全局深色代码底（[ChatCodeBlock] 默认）。 */
+data class ChatFencedCodeStyle(
+  val container: Color,
+  val border: Color,
+  val label: Color,
+  val content: Color,
+)
+
 @Composable
-fun ChatMarkdown(text: String, textColor: Color) {
+fun ChatMarkdown(
+  text: String,
+  textColor: Color,
+  fencedCodeStyle: ChatFencedCodeStyle? = null,
+) {
   val document = remember(text) { markdownParser.parse(text) as Document }
   val inlineStyles = InlineStyles(inlineCodeBg = mobileCodeBg, inlineCodeColor = mobileCodeText, linkColor = mobileAccent, baseCallout = mobileCallout)
 
@@ -102,6 +114,7 @@ fun ChatMarkdown(text: String, textColor: Color) {
       textColor = textColor,
       inlineStyles = inlineStyles,
       listDepth = 0,
+      fencedCodeStyle = fencedCodeStyle,
     )
   }
 }
@@ -112,6 +125,7 @@ private fun RenderMarkdownBlocks(
   textColor: Color,
   inlineStyles: InlineStyles,
   listDepth: Int,
+  fencedCodeStyle: ChatFencedCodeStyle?,
 ) {
   var node = start
   while (node != null) {
@@ -130,12 +144,37 @@ private fun RenderMarkdownBlocks(
       }
       is FencedCodeBlock -> {
         SelectionContainer(modifier = Modifier.fillMaxWidth()) {
-          ChatCodeBlock(code = current.literal.orEmpty(), language = current.info?.trim()?.ifEmpty { null })
+          val literal = current.literal.orEmpty()
+          val lang = current.info?.trim()?.ifEmpty { null }
+          if (fencedCodeStyle != null) {
+            ChatCodeBlock(
+              code = literal,
+              language = lang,
+              containerColor = fencedCodeStyle.container,
+              borderColor = fencedCodeStyle.border,
+              labelColor = fencedCodeStyle.label,
+              codeColor = fencedCodeStyle.content,
+            )
+          } else {
+            ChatCodeBlock(code = literal, language = lang)
+          }
         }
       }
       is IndentedCodeBlock -> {
         SelectionContainer(modifier = Modifier.fillMaxWidth()) {
-          ChatCodeBlock(code = current.literal.orEmpty(), language = null)
+          val literal = current.literal.orEmpty()
+          if (fencedCodeStyle != null) {
+            ChatCodeBlock(
+              code = literal,
+              language = null,
+              containerColor = fencedCodeStyle.container,
+              borderColor = fencedCodeStyle.border,
+              labelColor = fencedCodeStyle.label,
+              codeColor = fencedCodeStyle.content,
+            )
+          } else {
+            ChatCodeBlock(code = literal, language = null)
+          }
         }
       }
       is BlockQuote -> {
@@ -162,6 +201,7 @@ private fun RenderMarkdownBlocks(
               textColor = textColor,
               inlineStyles = inlineStyles,
               listDepth = listDepth,
+              fencedCodeStyle = fencedCodeStyle,
             )
           }
         }
@@ -172,6 +212,7 @@ private fun RenderMarkdownBlocks(
           textColor = textColor,
           inlineStyles = inlineStyles,
           listDepth = listDepth,
+          fencedCodeStyle = fencedCodeStyle,
         )
       }
       is OrderedList -> {
@@ -180,6 +221,7 @@ private fun RenderMarkdownBlocks(
           textColor = textColor,
           inlineStyles = inlineStyles,
           listDepth = listDepth,
+          fencedCodeStyle = fencedCodeStyle,
         )
       }
       is TableBlock -> {
@@ -242,6 +284,7 @@ private fun RenderBulletList(
   textColor: Color,
   inlineStyles: InlineStyles,
   listDepth: Int,
+  fencedCodeStyle: ChatFencedCodeStyle?,
 ) {
   Column(
     modifier = Modifier.padding(start = (LIST_INDENT_DP * listDepth).dp),
@@ -256,6 +299,7 @@ private fun RenderBulletList(
           textColor = textColor,
           inlineStyles = inlineStyles,
           listDepth = listDepth,
+          fencedCodeStyle = fencedCodeStyle,
         )
       }
       item = item.next
@@ -269,6 +313,7 @@ private fun RenderOrderedList(
   textColor: Color,
   inlineStyles: InlineStyles,
   listDepth: Int,
+  fencedCodeStyle: ChatFencedCodeStyle?,
 ) {
   Column(
     modifier = Modifier.padding(start = (LIST_INDENT_DP * listDepth).dp),
@@ -284,6 +329,7 @@ private fun RenderOrderedList(
           textColor = textColor,
           inlineStyles = inlineStyles,
           listDepth = listDepth,
+          fencedCodeStyle = fencedCodeStyle,
         )
         index += 1
       }
@@ -299,6 +345,7 @@ private fun RenderListItem(
   textColor: Color,
   inlineStyles: InlineStyles,
   listDepth: Int,
+  fencedCodeStyle: ChatFencedCodeStyle?,
 ) {
   var contentStart = item.firstChild
   var marker = markerText
@@ -329,6 +376,7 @@ private fun RenderListItem(
         textColor = textColor,
         inlineStyles = inlineStyles,
         listDepth = listDepth + 1,
+        fencedCodeStyle = fencedCodeStyle,
       )
     }
   }

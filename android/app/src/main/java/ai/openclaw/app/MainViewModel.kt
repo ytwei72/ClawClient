@@ -8,6 +8,7 @@ import ai.openclaw.app.chat.ChatGatewayAgent
 import ai.openclaw.app.chat.ChatMessage
 import ai.openclaw.app.chat.ChatPendingToolCall
 import ai.openclaw.app.chat.ChatSessionEntry
+import ai.openclaw.app.ui.chat.ChatPageThemeKind
 import ai.openclaw.app.chat.OutgoingAttachment
 import ai.openclaw.app.gateway.DeviceIdentityStore
 import ai.openclaw.app.gateway.GatewayEndpoint
@@ -121,6 +122,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val chatGatewayAgents: StateFlow<List<ChatGatewayAgent>> =
     runtimeState(initial = emptyList()) { it.chatGatewayAgents }
   val pendingRunCount: StateFlow<Int> = runtimeState(initial = 0) { it.pendingRunCount }
+
+  private val _chatPageThemeKind = MutableStateFlow(ChatPageThemeKind.VioletTeal)
+  val chatPageThemeKind: StateFlow<ChatPageThemeKind> = _chatPageThemeKind
 
   init {
     if (prefs.onboardingCompleted.value) {
@@ -324,6 +328,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setChatThinkingLevel(level: String) {
     ensureRuntime().setChatThinkingLevel(level)
+  }
+
+  fun setChatPageThemeKind(kind: ChatPageThemeKind) {
+    _chatPageThemeKind.value = kind
   }
 
   fun switchChatSession(sessionKey: String) {

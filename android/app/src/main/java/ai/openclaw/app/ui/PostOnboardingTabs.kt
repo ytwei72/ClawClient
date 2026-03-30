@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import ai.openclaw.app.MainViewModel
 import ai.openclaw.app.chat.ChatGatewayAgent
 import ai.openclaw.app.chat.ChatSessionEntry
+import ai.openclaw.app.ui.chat.ChatPageThemeDropdownMenu
 import ai.openclaw.app.ui.chat.agentIdFromSessionKey
 import ai.openclaw.app.ui.chat.friendlySessionName
 import ai.openclaw.app.ui.chat.resolveAllSessionChoicesForAgent
@@ -121,6 +122,7 @@ fun PostOnboardingTabs(viewModel: MainViewModel, modifier: Modifier = Modifier) 
   val micEnabled by viewModel.micEnabled.collectAsState()
   val micCooldown by viewModel.micCooldown.collectAsState()
   val speakerEnabled by viewModel.speakerEnabled.collectAsState()
+  val chatPageThemeKind by viewModel.chatPageThemeKind.collectAsState()
 
   val density = LocalDensity.current
   val imeVisible = WindowInsets.ime.getBottom(density) > 0
@@ -141,6 +143,17 @@ fun PostOnboardingTabs(viewModel: MainViewModel, modifier: Modifier = Modifier) 
         micEnabled = micEnabled,
         micCooldown = micCooldown,
         speakerEnabled = speakerEnabled,
+        trailingLeadContent =
+          if (activeTab == HomeTab.Chat) {
+            {
+              ChatPageThemeDropdownMenu(
+                selected = chatPageThemeKind,
+                onSelect = viewModel::setChatPageThemeKind,
+              )
+            }
+          } else {
+            null
+          },
       )
     },
     bottomBar = {

@@ -71,6 +71,8 @@ fun ScreenTopStatusBar(
   micEnabled: Boolean,
   micCooldown: Boolean,
   speakerEnabled: Boolean,
+  /** 置于右侧状态簇最前（麦克风图标左侧），例如聊天页气泡主题选择。 */
+  trailingLeadContent: (@Composable () -> Unit)? = null,
   modifier: Modifier = Modifier,
 ) {
   val safeInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
@@ -132,13 +134,19 @@ fun ScreenTopStatusBar(
           }
         }
       }
-      ScreenTopStatusBarTrailing(
-        connectionStatusText = connectionStatusText,
-        statusVisual = statusVisual,
-        micEnabled = micEnabled,
-        micCooldown = micCooldown,
-        speakerEnabled = speakerEnabled,
-      )
+      Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        trailingLeadContent?.invoke()
+        ScreenTopStatusBarTrailing(
+          connectionStatusText = connectionStatusText,
+          statusVisual = statusVisual,
+          micEnabled = micEnabled,
+          micCooldown = micCooldown,
+          speakerEnabled = speakerEnabled,
+        )
+      }
     }
   }
 }

@@ -12,6 +12,8 @@
 | assistant · toolCall | 深色代码底（#2C2C2A） | 工具调用是 JSON 代码，延续代码编辑器的暗色惯例，与文字气泡形成强区分 |
 | toolResult | 琥珀色（#FAEEDA / #EF9F27） | 工具结果是"外部数据回传"，琥珀偏黄暖，与 toolCall 的深色形成呼应 |
 
+![Chat 页对话气泡配色示意](chat气泡配色.png)
+
 **细节设计要点：**
 
 - **气泡尾角**：user 右下圆角收小（4px），assistant/toolResult 左下收小，符合主流 IM 习惯

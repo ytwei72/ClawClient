@@ -50,15 +50,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.openclaw.app.ui.mobileAccent
-import ai.openclaw.app.ui.mobileAccentBorderStrong
-import ai.openclaw.app.ui.mobileAccentSoft
 import ai.openclaw.app.ui.mobileBorder
-import ai.openclaw.app.ui.mobileBorderStrong
 import ai.openclaw.app.ui.mobileCallout
 import ai.openclaw.app.ui.mobileCaption1
-import ai.openclaw.app.ui.mobileCardSurface
 import ai.openclaw.app.ui.mobileHeadline
-import ai.openclaw.app.ui.mobileSurface
 import ai.openclaw.app.ui.mobileText
 import ai.openclaw.app.ui.mobileTextSecondary
 import ai.openclaw.app.ui.mobileTextTertiary
@@ -76,6 +71,7 @@ fun ChatComposer(
   onAbort: () -> Unit,
   onSend: (text: String) -> Unit,
 ) {
+  val composer = LocalChatBubbleTheme.current.composer
   var input by rememberSaveable { mutableStateOf("") }
   var showThinkingMenu by remember { mutableStateOf(false) }
 
@@ -102,7 +98,7 @@ fun ChatComposer(
           imeAction = ImeAction.Default,
         ),
       shape = RoundedCornerShape(14.dp),
-      colors = chatTextFieldColors(),
+      colors = chatTextFieldColors(composer),
     )
 
     if (!healthOk) {
@@ -122,8 +118,8 @@ fun ChatComposer(
         Surface(
           onClick = { showThinkingMenu = true },
           shape = RoundedCornerShape(14.dp),
-          color = mobileCardSurface,
-          border = BorderStroke(1.dp, mobileBorderStrong),
+          color = composer.thinkingMenuBg,
+          border = BorderStroke(1.dp, composer.thinkingMenuBorder),
         ) {
           Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
@@ -153,10 +149,10 @@ fun ChatComposer(
           expanded = showThinkingMenu,
           onDismissRequest = { showThinkingMenu = false },
           shape = RoundedCornerShape(16.dp),
-          containerColor = mobileCardSurface,
+          containerColor = composer.dropdownBg,
           tonalElevation = 0.dp,
           shadowElevation = 8.dp,
-          border = BorderStroke(1.dp, mobileBorder),
+          border = BorderStroke(1.dp, composer.dropdownBorder),
         ) {
           ThinkingMenuItem("off", thinkingLevel, onSetThinkingLevel) { showThinkingMenu = false }
           ThinkingMenuItem("low", thinkingLevel, onSetThinkingLevel) { showThinkingMenu = false }
@@ -171,6 +167,7 @@ fun ChatComposer(
         enabled = true,
         compact = true,
         onClick = onPickImages,
+        chrome = composer,
       )
 
       SecondaryActionButton(
@@ -179,6 +176,7 @@ fun ChatComposer(
         enabled = true,
         compact = true,
         onClick = onRefresh,
+        chrome = composer,
       )
 
       SecondaryActionButton(
@@ -187,6 +185,7 @@ fun ChatComposer(
         enabled = pendingRunCount > 0,
         compact = true,
         onClick = onAbort,
+        chrome = composer,
       )
 
       Spacer(modifier = Modifier.weight(1f))
@@ -203,15 +202,15 @@ fun ChatComposer(
         contentPadding = PaddingValues(horizontal = 20.dp),
         colors =
           ButtonDefaults.buttonColors(
-            containerColor = mobileAccent,
-            contentColor = Color.White,
-            disabledContainerColor = mobileBorderStrong,
+            containerColor = composer.sendBg,
+            contentColor = composer.sendContent,
+            disabledContainerColor = composer.sendDisabledBg,
             disabledContentColor = mobileTextTertiary,
           ),
-        border = BorderStroke(1.dp, if (canSend) mobileAccentBorderStrong else mobileBorderStrong),
+        border = BorderStroke(1.dp, if (canSend) composer.sendBorder else composer.sendBorderDisabled),
       ) {
         if (sendBusy) {
-          CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+          CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = composer.sendContent)
         } else {
           Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(16.dp))
         }
@@ -234,6 +233,7 @@ private fun SecondaryActionButton(
   enabled: Boolean,
   compact: Boolean = false,
   onClick: () -> Unit,
+  chrome: ComposerThemeChrome,
 ) {
   Button(
     onClick = onClick,
@@ -242,12 +242,12 @@ private fun SecondaryActionButton(
     shape = RoundedCornerShape(14.dp),
     colors =
       ButtonDefaults.buttonColors(
-        containerColor = mobileCardSurface,
-        contentColor = mobileTextSecondary,
-        disabledContainerColor = mobileCardSurface,
+        containerColor = chrome.secondaryBg,
+        contentColor = chrome.secondaryContent,
+        disabledContainerColor = chrome.secondaryBg,
         disabledContentColor = mobileTextTertiary,
       ),
-    border = BorderStroke(1.dp, mobileBorderStrong),
+    border = BorderStroke(1.dp, chrome.secondaryBorder),
     contentPadding = if (compact) PaddingValues(0.dp) else ButtonDefaults.ContentPadding,
   ) {
     Icon(icon, contentDescription = label, modifier = Modifier.size(14.dp))
@@ -256,7 +256,7 @@ private fun SecondaryActionButton(
       Text(
         text = label,
         style = mobileCallout.copy(fontWeight = FontWeight.SemiBold),
-        color = if (enabled) mobileTextSecondary else mobileTextTertiary,
+        color = if (enabled) chrome.secondaryContent else mobileTextTertiary,
       )
     }
   }
@@ -333,10 +333,11 @@ private fun AttachmentsStrip(
 
 @Composable
 private fun AttachmentChip(fileName: String, onRemove: () -> Unit) {
+  val chrome = LocalChatBubbleTheme.current.composer
   Surface(
     shape = RoundedCornerShape(999.dp),
-    color = mobileAccentSoft,
-    border = BorderStroke(1.dp, mobileBorderStrong),
+    color = chrome.attachmentChipBg,
+    border = BorderStroke(1.dp, chrome.attachmentChipBorder),
   ) {
     Row(
       modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -353,8 +354,8 @@ private fun AttachmentChip(fileName: String, onRemove: () -> Unit) {
       Surface(
         onClick = onRemove,
         shape = RoundedCornerShape(999.dp),
-        color = mobileCardSurface,
-        border = BorderStroke(1.dp, mobileBorderStrong),
+        color = chrome.attachmentRemoveBg,
+        border = BorderStroke(1.dp, chrome.attachmentRemoveBorder),
       ) {
         Text(
           text = "×",
@@ -368,15 +369,15 @@ private fun AttachmentChip(fileName: String, onRemove: () -> Unit) {
 }
 
 @Composable
-private fun chatTextFieldColors() =
+private fun chatTextFieldColors(chrome: ComposerThemeChrome) =
   OutlinedTextFieldDefaults.colors(
-    focusedContainerColor = mobileSurface,
-    unfocusedContainerColor = mobileSurface,
-    focusedBorderColor = mobileAccent,
-    unfocusedBorderColor = mobileBorder,
+    focusedContainerColor = chrome.textFieldBg,
+    unfocusedContainerColor = chrome.textFieldBg,
+    focusedBorderColor = chrome.textFieldBorderFocused,
+    unfocusedBorderColor = chrome.textFieldBorderUnfocused,
     focusedTextColor = mobileText,
     unfocusedTextColor = mobileText,
-    cursorColor = mobileAccent,
+    cursorColor = chrome.textFieldBorderFocused,
   )
 
 @Composable

@@ -17,10 +17,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -56,7 +56,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatSheetContent(viewModel: MainViewModel) {
   val messages by viewModel.chatMessages.collectAsState()
@@ -70,6 +69,8 @@ fun ChatSheetContent(viewModel: MainViewModel) {
   val pendingToolCalls by viewModel.chatPendingToolCalls.collectAsState()
   val gatewayAgents by viewModel.chatGatewayAgents.collectAsState()
   val isConnected by viewModel.isConnected.collectAsState()
+  val chatPageThemeKind by viewModel.chatPageThemeKind.collectAsState()
+  val chatBubbleTheme = chatBubbleThemeTokens(chatPageThemeKind)
 
   LaunchedEffect(mainSessionKey) {
     viewModel.loadChat(mainSessionKey)
@@ -115,18 +116,19 @@ fun ChatSheetContent(viewModel: MainViewModel) {
       )
     }
 
-  Column(
-    modifier =
-      Modifier
-        .fillMaxSize()
-        .padding(horizontal = 20.dp, vertical = 12.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
-  ) {
-    if (!errorText.isNullOrBlank()) {
-      ChatErrorRail(errorText = errorText!!)
-    }
+  CompositionLocalProvider(LocalChatBubbleTheme provides chatBubbleTheme) {
+    Column(
+      modifier =
+        Modifier
+          .fillMaxSize()
+          .padding(horizontal = 20.dp, vertical = 12.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      if (!errorText.isNullOrBlank()) {
+        ChatErrorRail(errorText = errorText!!)
+      }
 
-    ChatMessageListCard(
+      ChatMessageListCard(
       messages = messages,
       pendingRunCount = pendingRunCount,
       pendingToolCalls = pendingToolCalls,
@@ -165,6 +167,7 @@ fun ChatSheetContent(viewModel: MainViewModel) {
           attachments.clear()
         },
       )
+    }
     }
   }
 }
