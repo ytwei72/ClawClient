@@ -25,7 +25,8 @@ class NodeForegroundService : Service() {
   override fun onCreate() {
     super.onCreate()
     ensureChannel()
-    val initial = buildNotification(title = "OpenClaw 节点", text = "正在启动…")
+    val initial =
+      buildNotification(title = getString(R.string.app_name), text = "正在启动…")
     startForegroundWithTypes(notification = initial)
 
     val runtime = (application as NodeApp).peekRuntime()
@@ -44,7 +45,12 @@ class NodeForegroundService : Service() {
         ) { status, server, connected, micEnabled, micListening ->
           Quint(status, server, connected, micEnabled, micListening)
         }.collect { (status, server, connected, micEnabled, micListening) ->
-          val title = if (connected) "OpenClaw 节点 · 已连接" else "OpenClaw 节点"
+          val title =
+            if (connected) {
+              "${getString(R.string.app_name)} · 已连接"
+            } else {
+              getString(R.string.app_name)
+            }
           val micSuffix =
             if (micEnabled) {
               if (micListening) " · 麦克风：聆听中" else " · 麦克风：待开启"
@@ -88,7 +94,7 @@ class NodeForegroundService : Service() {
         "连接",
         NotificationManager.IMPORTANCE_LOW,
       ).apply {
-        description = "OpenClaw 节点连接状态"
+        description = getString(R.string.node_channel_description)
         setShowBadge(false)
       }
     mgr.createNotificationChannel(channel)

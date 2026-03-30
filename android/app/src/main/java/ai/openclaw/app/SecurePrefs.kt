@@ -165,6 +165,40 @@ class SecurePrefs(
     _manualTls.value = value
   }
 
+  /**
+   * Full client reset for gateway pairing: all stored device-role tokens (any device id), shared
+   * install/manual token, bootstrap/password for the **current** instance id, then a **new**
+   * [instanceId] (sent as `client.instanceId` on connect), all TLS pin entries, and last discovery id.
+   */
+  fun clearAllGatewayPairingState() {
+    val id = _instanceId.value.trim()
+    val deviceTokenKeys = securePrefs.all.keys.filter { it.startsWith("gateway.deviceToken.") }
+    val tlsKeys = plainPrefs.all.keys.filter { it.startsWith("gateway.tls.") }
+    securePrefs.edit {
+      for (k in deviceTokenKeys) {
+        remove(k)
+      }
+      remove("gateway.manual.token")
+      if (id.isNotEmpty()) {
+        remove("gateway.token.$id")
+        remove("gateway.bootstrapToken.$id")
+        remove("gateway.password.$id")
+      }
+    }
+    _gatewayToken.value = ""
+    _gatewayBootstrapToken.value = ""
+
+    val newInstanceId = UUID.randomUUID().toString()
+    plainPrefs.edit {
+      putString("node.instanceId", newInstanceId)
+      for (k in tlsKeys) {
+        remove(k)
+      }
+    }
+    _instanceId.value = newInstanceId
+    setLastDiscoveredStableId("")
+  }
+
   fun setGatewayToken(value: String) {
     val trimmed = value.trim()
     securePrefs.edit { putString("gateway.manual.token", trimmed) }

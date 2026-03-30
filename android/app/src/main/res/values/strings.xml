@@ -1,3 +1,5 @@
 <resources>
-    <string name="app_name">OpenClaw 节点</string>
+    <string name="app_name">灵犀Claw</string>
+    <string name="node_channel_description">灵犀Claw 节点连接状态</string>
+    <string name="voice_wake_label">灵犀Claw 语音唤醒</string>
 </resources>

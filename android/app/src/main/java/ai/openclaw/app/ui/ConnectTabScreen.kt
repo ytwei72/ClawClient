@@ -38,6 +38,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,18 +75,24 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
   val pendingTrust by viewModel.pendingGatewayTrust.collectAsState()
 
   var advancedOpen by rememberSaveable { mutableStateOf(false) }
+  // Do NOT put gatewayToken in remember(...) keys: each keystroke would recreate MutableState and crash Compose.
   var inputMode by
-    remember(manualEnabled, manualHost, gatewayToken) {
+    remember(manualEnabled, manualHost) {
       mutableStateOf(
-        if (manualEnabled || manualHost.isNotBlank() || gatewayToken.trim().isNotEmpty()) {
+        if (manualEnabled || manualHost.isNotBlank()) {
           ConnectInputMode.Manual
         } else {
           ConnectInputMode.SetupCode
         },
       )
     }
+  LaunchedEffect(gatewayToken) {
+    if (gatewayToken.isNotBlank()) {
+      inputMode = ConnectInputMode.Manual
+    }
+  }
   var setupCode by rememberSaveable { mutableStateOf("") }
-  var manualHostInput by rememberSaveable { mutableStateOf(manualHost.ifBlank { "10.0.2.2" }) }
+  var manualHostInput by rememberSaveable { mutableStateOf(manualHost.ifBlank { "" }) }
   var manualPortInput by rememberSaveable { mutableStateOf(manualPort.toString()) }
   var manualTlsInput by rememberSaveable { mutableStateOf(manualTls) }
   var passwordInput by rememberSaveable { mutableStateOf("") }
@@ -397,27 +404,6 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
               EndpointPreview(endpoint = setupResolvedEndpoint)
             }
           } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              QuickFillChip(
-                label = "Android 模拟器",
-                onClick = {
-                  manualHostInput = "10.0.2.2"
-                  manualPortInput = "18789"
-                  manualTlsInput = false
-                  validationText = null
-                },
-              )
-              QuickFillChip(
-                label = "本机",
-                onClick = {
-                  manualHostInput = "127.0.0.1"
-                  manualPortInput = "18789"
-                  manualTlsInput = false
-                  validationText = null
-                },
-              )
-            }
-
             Text("主机", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
             OutlinedTextField(
               value = manualHostInput,
@@ -425,7 +411,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
                 manualHostInput = it
                 validationText = null
               },
-              placeholder = { Text("10.0.2.2", style = mobileBody, color = mobileTextTertiary) },
+              placeholder = { Text("网关主机名或 IP", style = mobileBody, color = mobileTextTertiary) },
               modifier = Modifier.fillMaxWidth(),
               singleLine = true,
               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
@@ -536,23 +522,6 @@ private fun MethodChip(label: String, active: Boolean, onClick: () -> Unit) {
     border = BorderStroke(1.dp, if (active) mobileAccentBorderStrong else mobileBorderStrong),
   ) {
     Text(label, style = mobileCaption1.copy(fontWeight = FontWeight.Bold))
-  }
-}
-
-@Composable
-private fun QuickFillChip(label: String, onClick: () -> Unit) {
-  Button(
-    onClick = onClick,
-    shape = RoundedCornerShape(999.dp),
-    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-    colors =
-      ButtonDefaults.buttonColors(
-        containerColor = mobileAccentSoft,
-        contentColor = mobileAccent,
-      ),
-    elevation = null,
-  ) {
-    Text(label, style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold))
   }
 }
 

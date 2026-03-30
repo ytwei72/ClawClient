@@ -874,6 +874,21 @@ class NodeRuntime(
     }
   }
 
+  /**
+   * Clears device keys + gateway device tokens and drops any connection. Used when entering
+   * onboarding so the next connect is a fresh gateway pairing.
+   */
+  fun clearLocalDeviceIdentityForOnboarding() {
+    prefs.clearAllGatewayPairingState()
+    val previousIdentity = identityStore.peekStoredIdentityOrNull()
+    if (previousIdentity != null) {
+      deviceAuthStore.clearToken(previousIdentity.deviceId, "node")
+      deviceAuthStore.clearToken(previousIdentity.deviceId, "operator")
+    }
+    identityStore.clearStoredIdentity()
+    disconnect()
+  }
+
   fun refreshGatewayConnection() {
     val endpoint =
       connectedEndpoint ?: run {

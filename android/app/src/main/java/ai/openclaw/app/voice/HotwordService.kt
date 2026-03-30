@@ -232,7 +232,11 @@ class HotwordService : Service() {
   private fun ensureNotificationChannel() {
     val manager = getSystemService(NotificationManager::class.java)
     val channel =
-      NotificationChannel(channelId, "OpenClaw 语音唤醒", NotificationManager.IMPORTANCE_LOW)
+      NotificationChannel(
+        channelId,
+        getString(R.string.voice_wake_label),
+        NotificationManager.IMPORTANCE_LOW,
+      )
     manager.createNotificationChannel(channel)
   }
 
@@ -246,7 +250,7 @@ class HotwordService : Service() {
       )
     return NotificationCompat.Builder(this, channelId)
       .setSmallIcon(R.mipmap.ic_launcher)
-      .setContentTitle("OpenClaw 语音唤醒")
+      .setContentTitle(getString(R.string.voice_wake_label))
       .setContentText(content)
       .setContentIntent(pending)
       .setOngoing(true)

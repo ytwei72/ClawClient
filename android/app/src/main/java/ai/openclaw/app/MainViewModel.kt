@@ -241,6 +241,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     ensureRuntime().refreshGatewayConnection()
   }
 
+  /**
+   * Clears device keys plus all gateway pairing prefs ([SecurePrefs.clearAllGatewayPairingState]),
+   * then disconnects. Ensures [NodeRuntime] exists so WebSocket sessions close cleanly.
+   */
+  fun clearDeviceIdentityForOnboardingEntry() {
+    ensureRuntime().clearLocalDeviceIdentityForOnboarding()
+  }
+
+  /** Settings-friendly alias: same as [clearDeviceIdentityForOnboardingEntry]. */
+  fun resetGatewayPairingClientState() {
+    clearDeviceIdentityForOnboardingEntry()
+  }
+
   fun connect(endpoint: GatewayEndpoint) {
     ensureRuntime().connect(endpoint)
   }

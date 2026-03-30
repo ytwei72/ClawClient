@@ -20,6 +20,27 @@ class DeviceIdentityStore(context: Context) {
   private val identityFile = File(context.filesDir, "openclaw/identity/device.json")
   @Volatile private var cachedIdentity: DeviceIdentity? = null
 
+  /**
+   * Returns the persisted identity without creating one. Used for clearing pairing state
+   * for the current device id (e.g. after the gateway revoked the device).
+   */
+  @Synchronized
+  fun peekStoredIdentityOrNull(): DeviceIdentity? {
+    cachedIdentity?.let { return it }
+    return load()
+  }
+
+  /** Deletes stored keys so the next [loadOrCreate] generates a new device identity. */
+  @Synchronized
+  fun clearStoredIdentity() {
+    cachedIdentity = null
+    try {
+      if (identityFile.exists()) identityFile.delete()
+    } catch (_: Throwable) {
+      // best-effort only
+    }
+  }
+
   @Synchronized
   fun loadOrCreate(): DeviceIdentity {
     cachedIdentity?.let { return it }

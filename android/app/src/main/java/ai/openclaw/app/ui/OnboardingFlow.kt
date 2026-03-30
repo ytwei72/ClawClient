@@ -71,6 +71,7 @@ import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -100,6 +101,9 @@ import ai.openclaw.app.node.DeviceNotificationListenerService
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+
+private const val ONBOARDING_MANUAL_HOST_DEFAULT = "100.118.60.120"
+private const val ONBOARDING_MANUAL_PORT_DEFAULT = "16232"
 
 private enum class OnboardingStep(val index: Int, val label: String) {
   Welcome(1, "欢迎"),
@@ -222,9 +226,11 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
   var gatewayPassword by rememberSaveable { mutableStateOf("") }
   var gatewayInputMode by rememberSaveable { mutableStateOf(GatewayInputMode.SetupCode) }
   var gatewayAdvancedOpen by rememberSaveable { mutableStateOf(false) }
-  var manualHost by rememberSaveable { mutableStateOf("10.0.2.2") }
-  var manualPort by rememberSaveable { mutableStateOf("18789") }
+  var manualHost by rememberSaveable { mutableStateOf(ONBOARDING_MANUAL_HOST_DEFAULT) }
+  var manualPort by rememberSaveable { mutableStateOf(ONBOARDING_MANUAL_PORT_DEFAULT) }
   var manualTls by rememberSaveable { mutableStateOf(false) }
+  /** Manual 模式令牌仅存在草稿；连接前不写入 prefs。留空时仅靠新设备密钥，便于 OpenClaw 出现「待批准」。 */
+  var manualGatewayTokenDraft by rememberSaveable { mutableStateOf("") }
   var gatewayError by rememberSaveable { mutableStateOf<String?>(null) }
   var attemptedConnect by rememberSaveable { mutableStateOf(false) }
 
@@ -236,6 +242,14 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
         .build()
     }
   val qrScanner = remember(context, qrScannerOptions) { GmsBarcodeScanning.getClient(context, qrScannerOptions) }
+
+  var didClearDeviceIdentityForOnboarding by rememberSaveable { mutableStateOf(false) }
+  LaunchedEffect(Unit) {
+    if (didClearDeviceIdentityForOnboarding) return@LaunchedEffect
+    viewModel.clearDeviceIdentityForOnboardingEntry()
+    didClearDeviceIdentityForOnboarding = true
+    manualGatewayTokenDraft = ""
+  }
 
   val smsAvailable =
     remember(context) {
@@ -552,7 +566,7 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
               manualHost = manualHost,
               manualPort = manualPort,
               manualTls = manualTls,
-              gatewayToken = persistedGatewayToken,
+              gatewayToken = manualGatewayTokenDraft,
               gatewayPassword = gatewayPassword,
               gatewayError = gatewayError,
               onScanQrClick = {
@@ -598,7 +612,10 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                 gatewayError = null
               },
               onManualTlsChange = { manualTls = it },
-              onTokenChange = viewModel::setGatewayToken,
+              onTokenChange = {
+                manualGatewayTokenDraft = it
+                gatewayError = null
+              },
               onPasswordChange = { gatewayPassword = it },
             )
           OnboardingStep.Permissions ->
@@ -866,7 +883,12 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                     gatewayError = "无效的 Gateway 地址。"
                     return@Button
                   }
-                  val token = persistedGatewayToken.trim()
+                  val token =
+                    if (gatewayInputMode == GatewayInputMode.Manual) {
+                      manualGatewayTokenDraft.trim()
+                    } else {
+                      persistedGatewayToken.trim()
+                    }
                   val password = gatewayPassword.trim()
                   attemptedConnect = true
                   viewModel.setManualEnabled(true)
@@ -1088,24 +1110,13 @@ private fun GatewayStep(
             ResolvedEndpoint(endpoint = resolvedEndpoint)
           }
         } else {
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            QuickFillChip(label = "Android 模拟器", onClick = {
-              onManualHostChange("10.0.2.2")
-              onManualPortChange("18789")
-              onManualTlsChange(false)
-            })
-            QuickFillChip(label = "本机", onClick = {
-              onManualHostChange("127.0.0.1")
-              onManualPortChange("18789")
-              onManualTlsChange(false)
-            })
-          }
-
           Text("主机", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
           OutlinedTextField(
             value = manualHost,
             onValueChange = onManualHostChange,
-            placeholder = { Text("10.0.2.2", color = onboardingTextTertiary, style = onboardingBodyStyle) },
+            placeholder = {
+              Text(ONBOARDING_MANUAL_HOST_DEFAULT, color = onboardingTextTertiary, style = onboardingBodyStyle)
+            },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
@@ -1119,7 +1130,7 @@ private fun GatewayStep(
           OutlinedTextField(
             value = manualPort,
             onValueChange = onManualPortChange,
-            placeholder = { Text("18789", color = onboardingTextTertiary, style = onboardingBodyStyle) },
+            placeholder = { Text(ONBOARDING_MANUAL_PORT_DEFAULT, color = onboardingTextTertiary, style = onboardingBodyStyle) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1147,10 +1158,21 @@ private fun GatewayStep(
           }
 
           Text("令牌（可选）", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
+          Text(
+            "本机设备密钥已在进入引导时重置。若此处仍填写网关共享令牌，连接会以令牌优先认证，OpenClaw 往往不再显示「待批准设备」。需要待批准时请保持为空，连接成功后再按需配置令牌。",
+            style = onboardingCaption2Style,
+            color = onboardingTextTertiary,
+          )
           OutlinedTextField(
             value = gatewayToken,
             onValueChange = onTokenChange,
-            placeholder = { Text("令牌", color = onboardingTextTertiary, style = onboardingBodyStyle) },
+            placeholder = {
+              Text(
+                "留空=设备配对；需要令牌时填写",
+                color = onboardingTextTertiary,
+                style = onboardingBodyStyle,
+              )
+            },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
@@ -1245,25 +1267,6 @@ private fun GatewayModeChip(
       text = label,
       style = onboardingCaption1Style.copy(fontWeight = FontWeight.Bold),
     )
-  }
-}
-
-@Composable
-private fun QuickFillChip(
-  label: String,
-  onClick: () -> Unit,
-) {
-  TextButton(
-    onClick = onClick,
-    shape = RoundedCornerShape(999.dp),
-    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp),
-    colors =
-      ButtonDefaults.textButtonColors(
-        containerColor = onboardingAccentSoft,
-        contentColor = onboardingAccent,
-      ),
-  ) {
-    Text(label, style = onboardingCaption1Style.copy(fontWeight = FontWeight.SemiBold))
   }
 }
 

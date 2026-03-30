@@ -36,6 +36,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -52,6 +53,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -99,6 +101,7 @@ fun SettingsSheet(viewModel: MainViewModel) {
   val hotwordDebugLogs by viewModel.hotwordDebugLogs.collectAsState()
   var hotwordTestStatus by remember { mutableStateOf<String?>(null) }
   var wakeWordMenuExpanded by remember { mutableStateOf(false) }
+  var showResetGatewayPairingDialog by remember { mutableStateOf(false) }
   val sherpaWakeWordLabels =
     remember(context) {
       runCatching { SherpaKwsKeywords.displayLabelsOrdered(context.assets) }.getOrElse { emptyList() }
@@ -392,6 +395,42 @@ fun SettingsSheet(viewModel: MainViewModel) {
     }
   }
 
+  if (showResetGatewayPairingDialog) {
+    AlertDialog(
+      onDismissRequest = { showResetGatewayPairingDialog = false },
+      containerColor = mobileCardSurface,
+      title = {
+        Text("重置网关配对？", style = mobileHeadline, color = mobileText)
+      },
+      text = {
+        Text(
+          "将清除本机设备密钥、所有已存设备令牌、网关安装令牌与 TLS 指纹，并轮换客户端实例 ID，然后断开连接。若 OpenClaw 侧仍记着旧设备，请在网关主机执行文档 `android/docs/网关重新配对.md` 中的命令。",
+          style = mobileCallout,
+          color = mobileText,
+        )
+      },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            showResetGatewayPairingDialog = false
+            viewModel.resetGatewayPairingClientState()
+          },
+          colors = ButtonDefaults.textButtonColors(contentColor = mobileDanger),
+        ) {
+          Text("重置")
+        }
+      },
+      dismissButton = {
+        TextButton(
+          onClick = { showResetGatewayPairingDialog = false },
+          colors = ButtonDefaults.textButtonColors(contentColor = mobileTextSecondary),
+        ) {
+          Text("取消")
+        }
+      },
+    )
+  }
+
   Box(
     modifier =
       Modifier
@@ -438,6 +477,27 @@ fun SettingsSheet(viewModel: MainViewModel) {
               style = mobileCaption1.copy(fontFamily = FontFamily.Monospace),
               color = mobileTextTertiary,
             )
+            Text(
+              "若云端已删设备但仍无「待批准」，可在此重置后再连；令牌需留空或改网关侧状态。",
+              style = mobileCaption1,
+              color = mobileTextSecondary,
+              modifier = Modifier.padding(top = 6.dp),
+            )
+            Button(
+              onClick = { showResetGatewayPairingDialog = true },
+              modifier =
+                Modifier
+                  .fillMaxWidth()
+                  .padding(top = 8.dp),
+              colors =
+                ButtonDefaults.buttonColors(
+                  containerColor = mobileDanger.copy(alpha = 0.18f),
+                  contentColor = mobileDanger,
+                ),
+              shape = RoundedCornerShape(12.dp),
+            ) {
+              Text("重置网关配对（本机）", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
+            }
           }
         }
       }
@@ -1041,15 +1101,6 @@ private fun settingsPrimaryButtonColors() =
     containerColor = mobileAccent,
     contentColor = Color.White,
     disabledContainerColor = mobileAccent.copy(alpha = 0.45f),
-    disabledContentColor = Color.White.copy(alpha = 0.9f),
-  )
-
-@Composable
-private fun settingsDangerButtonColors() =
-  ButtonDefaults.buttonColors(
-    containerColor = mobileDanger,
-    contentColor = Color.White,
-    disabledContainerColor = mobileDanger.copy(alpha = 0.45f),
     disabledContentColor = Color.White.copy(alpha = 0.9f),
   )
 

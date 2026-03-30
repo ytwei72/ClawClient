@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 灵犀：浅色弧线，暗示心念相通 -->
+    <path
+        android:pathData="M 70,22 C 90,22 99,38 99,54"
+        android:fillColor="#00000000"
+        android:strokeWidth="3.5"
+        android:strokeColor="#F8F4EC"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.42" />
+    <!-- Claw：三道弧状爪痕 -->
+    <path
+        android:pathData="M 30,76 C 34,52 42,38 52,26"
+        android:fillColor="#00000000"
+        android:strokeWidth="8.5"
+        android:strokeColor="#FFF9F2"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 44,78 C 48,50 56,36 66,26"
+        android:fillColor="#00000000"
+        android:strokeWidth="8.5"
+        android:strokeColor="#FFF9F2"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 58,78 C 62,52 70,38 80,28"
+        android:fillColor="#00000000"
+        android:strokeWidth="8.5"
+        android:strokeColor="#FFF9F2"
+        android:strokeLineCap="round" />
+</vector>
