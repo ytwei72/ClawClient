@@ -836,6 +836,16 @@ class NodeRuntime(
     talkMode.setPlaybackEnabled(value)
   }
 
+  /** 朗读固定示例句（语音页 TTS 试听，与助手回复无关）。 */
+  fun speakVoiceTtsSample(text: String) {
+    val trimmed = text.trim()
+    if (trimmed.isEmpty()) return
+    scope.launch {
+      if (!prefs.speakerEnabled.value) return@launch
+      talkMode.playTtsForText(trimmed)
+    }
+  }
+
   private fun stopActiveVoiceSession() {
     talkMode.ttsOnAllResponses = false
     talkMode.stopTts()

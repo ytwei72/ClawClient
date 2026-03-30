@@ -128,13 +128,24 @@ fun ChatComposer(
           Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
           ) {
             Text(
-              text = thinkingLabel(thinkingLevel),
+              text = "思考深度",
+              style = mobileCaption1,
+              color = mobileTextTertiary,
+            )
+            Text(
+              text = thinkingLevelWord(thinkingLevel),
               style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
               color = mobileTextSecondary,
             )
-            Icon(Icons.Default.ArrowDropDown, contentDescription = "选择思考深度", modifier = Modifier.size(18.dp), tint = mobileTextTertiary)
+            Icon(
+              Icons.Default.ArrowDropDown,
+              contentDescription = "选择思考深度，当前为「${thinkingLevelWord(thinkingLevel)}」",
+              modifier = Modifier.size(18.dp),
+              tint = mobileTextTertiary,
+            )
           }
         }
 
@@ -259,7 +270,16 @@ private fun ThinkingMenuItem(
   onDismiss: () -> Unit,
 ) {
   DropdownMenuItem(
-    text = { Text(thinkingLabel(value), style = mobileCallout, color = mobileText) },
+    text = {
+      Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(thinkingLevelWord(value), style = mobileCallout, color = mobileText)
+        Text(
+          thinkingLevelHint(value),
+          style = mobileCaption1.copy(fontSize = 11.sp, lineHeight = 14.sp),
+          color = mobileTextTertiary,
+        )
+      }
+    },
     onClick = {
       onSet(value)
       onDismiss()
@@ -274,12 +294,22 @@ private fun ThinkingMenuItem(
   )
 }
 
-private fun thinkingLabel(raw: String): String {
+/** 思考深度档位在界面上的简短用词（发往服务端仍为 off/low/medium/high）。 */
+private fun thinkingLevelWord(raw: String): String {
   return when (raw.trim().lowercase()) {
     "low" -> "低"
     "medium" -> "中"
     "high" -> "高"
-    else -> "关"
+    else -> "关闭"
+  }
+}
+
+private fun thinkingLevelHint(value: String): String {
+  return when (value.trim().lowercase()) {
+    "low" -> "少量模型推理，通常较快"
+    "medium" -> "中等推理，平衡速度与深度"
+    "high" -> "更深推理，可能更慢、更耗 token"
+    else -> "不额外强调模型推理，一般回复更快"
   }
 }
 

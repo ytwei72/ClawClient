@@ -229,6 +229,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     ensureRuntime().setSpeakerEnabled(enabled)
   }
 
+  fun speakVoiceTtsSample(text: String) {
+    ensureRuntime().speakVoiceTtsSample(text)
+  }
+
   fun setVoiceWakeMode(mode: VoiceWakeMode) {
     ensureRuntime().setVoiceWakeMode(mode)
   }
