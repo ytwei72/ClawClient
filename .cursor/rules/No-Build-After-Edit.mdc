@@ -1,0 +1,7 @@
+---
+alwaysApply: true
+---
+
+After making any code changes, do NOT run any build, compile, or check commands.
+Never execute: gradle, gradlew, ./gradlew, mvn, kotlinc, javac, adb, or any build-related CLI commands.
+Do not verify changes by building the project. Assume the code is correct after editing.
