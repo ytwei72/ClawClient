@@ -45,6 +45,10 @@ class NodeForegroundService : Service() {
         ) { status, server, connected, micEnabled, micListening ->
           Quint(status, server, connected, micEnabled, micListening)
         }.collect { (status, server, connected, micEnabled, micListening) ->
+          if (!connected && isConnectingStatus(status)) {
+            // Do not emit notification updates during connection-state churn.
+            return@collect
+          }
           val title =
             if (connected) {
               "${getString(R.string.app_name)} · 已连接"
@@ -67,13 +71,6 @@ class NodeForegroundService : Service() {
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    when (intent?.action) {
-      ACTION_STOP -> {
-        (application as NodeApp).peekRuntime()?.disconnect()
-        stopSelf()
-        return START_NOT_STICKY
-      }
-    }
     // Keep running; connection is managed by NodeRuntime (auto-reconnect + manual).
     return START_STICKY
   }
@@ -112,15 +109,6 @@ class NodeForegroundService : Service() {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
       )
 
-    val stopIntent = Intent(this, NodeForegroundService::class.java).setAction(ACTION_STOP)
-    val stopPending =
-      PendingIntent.getService(
-        this,
-        2,
-        stopIntent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-      )
-
     return NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(R.mipmap.ic_launcher)
       .setContentTitle(title)
@@ -129,7 +117,6 @@ class NodeForegroundService : Service() {
       .setOngoing(true)
       .setOnlyAlertOnce(true)
       .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-      .addAction(0, "断开", stopPending)
       .build()
   }
 
@@ -151,18 +138,16 @@ class NodeForegroundService : Service() {
     private const val CHANNEL_ID = "connection"
     private const val NOTIFICATION_ID = 1
 
-    private const val ACTION_STOP = "ai.openclaw.app.action.STOP"
-
     fun start(context: Context) {
       val intent = Intent(context, NodeForegroundService::class.java)
       context.startForegroundService(intent)
-    }
-
-    fun stop(context: Context) {
-      val intent = Intent(context, NodeForegroundService::class.java).setAction(ACTION_STOP)
-      context.startService(intent)
     }
   }
 }
 
 private data class Quint<A, B, C, D, E>(val first: A, val second: B, val third: C, val fourth: D, val fifth: E)
+
+private fun isConnectingStatus(status: String): Boolean {
+  val lower = status.lowercase()
+  return lower.contains("connecting") || lower.contains("reconnecting") || status.contains("连接中")
+}

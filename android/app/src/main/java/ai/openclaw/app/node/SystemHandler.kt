@@ -115,6 +115,9 @@ class SystemHandler private constructor(
         message = "INVALID_REQUEST: empty notification",
       )
     }
+    if (isConnectionProgressNotification(params)) {
+      return GatewaySession.InvokeResult.ok(null)
+    }
     if (!poster.isAuthorized()) {
       return GatewaySession.InvokeResult.error(
         code = "NOT_AUTHORIZED",
@@ -164,6 +167,16 @@ class SystemHandler private constructor(
     } catch (_: Throwable) {
       null
     }
+  }
+
+  private fun isConnectionProgressNotification(request: SystemNotifyRequest): Boolean {
+    val combined = "${request.title} ${request.body}".lowercase()
+    return combined.contains("connecting") ||
+      combined.contains("reconnecting") ||
+      combined.contains("connection status") ||
+      combined.contains("连接中") ||
+      combined.contains("重新连接中") ||
+      combined.contains("连接状态")
   }
 
   companion object {

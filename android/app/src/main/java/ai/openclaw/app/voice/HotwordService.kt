@@ -17,6 +17,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import ai.openclaw.app.MainActivity
 import ai.openclaw.app.R
@@ -48,10 +49,14 @@ import java.io.FileOutputStream
 class HotwordService : Service() {
   companion object {
     const val actionWakeTriggered = "ai.openclaw.app.action.WAKE_TRIGGERED"
+    const val actionOpenFromHotwordNotification = "ai.openclaw.app.action.OPEN_FROM_HOTWORD_NOTIFICATION"
     /** Broadcast extras: recognized / trigger label and wall-clock time of the hit. */
     const val extraWakeTriggerLabel = "ai.openclaw.extra.WAKE_TRIGGER_LABEL"
     const val extraWakeTimeEpochMs = "ai.openclaw.extra.WAKE_TIME_EPOCH_MS"
+    const val extraWakeSource = "ai.openclaw.extra.WAKE_SOURCE"
+    const val wakeSourceHotword = "hotword"
     private const val channelId = "openclaw_hotword"
+    private const val wakeEventChannelId = "openclaw_hotword_event_v2"
     private const val notificationId = 4001
     private const val sampleRate = 16_000.0f
     private const val extraWords = "extra_words"
@@ -110,7 +115,8 @@ class HotwordService : Service() {
   private var isDestroyed = false
   private val hotwordPrefs by lazy { getSharedPreferences("hotword_prefs", Context.MODE_PRIVATE) }
   private val wakeTraceTag = "WakeTrace"
-  private var lastHeardTextTraceAt = 0L
+  private var lastDebugMessage: String? = null
+  private var lastDebugMessageAtMs: Long = 0L
 
   private val voskListener: RecognitionListener =
     object : RecognitionListener {
@@ -135,6 +141,12 @@ class HotwordService : Service() {
     }
 
   private fun debugLog(message: String) {
+    val now = System.currentTimeMillis()
+    if (message == lastDebugMessage && now - lastDebugMessageAtMs < 2000L) {
+      return
+    }
+    lastDebugMessage = message
+    lastDebugMessageAtMs = now
     HotwordDebugLogger.log(message)
     Log.i(wakeTraceTag, "HotwordService: $message")
   }
@@ -142,10 +154,10 @@ class HotwordService : Service() {
   override fun onCreate() {
     super.onCreate()
     ensureNotificationChannel()
+    ensureWakeEventNotificationChannel()
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    debugLog("onStartCommand 收到启动请求")
     if (
       ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
       PackageManager.PERMISSION_GRANTED
@@ -240,6 +252,22 @@ class HotwordService : Service() {
         getString(R.string.voice_wake_label),
         NotificationManager.IMPORTANCE_LOW,
       )
+    manager.createNotificationChannel(channel)
+  }
+
+  private fun ensureWakeEventNotificationChannel() {
+    val manager = getSystemService(NotificationManager::class.java)
+    val channel =
+      NotificationChannel(
+        wakeEventChannelId,
+        "${getString(R.string.voice_wake_label)}提醒",
+        NotificationManager.IMPORTANCE_MAX,
+      ).apply {
+        lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+        description = "唤醒词命中后的前台提醒"
+        enableVibration(true)
+        setShowBadge(true)
+      }
     manager.createNotificationChannel(channel)
   }
 
@@ -394,8 +422,6 @@ class HotwordService : Service() {
       stopSelf()
       return
     }
-    debugLog("Sherpa KWS 关键词串: $keywordsArg")
-
     val stream = kws.createStream(keywordsArg)
     if (stream.ptr == 0L) {
       debugLog("Sherpa createStream 失败（音素行无效或与模型不一致）")
@@ -432,7 +458,6 @@ class HotwordService : Service() {
             return@launch
           }
           audioRecord.startRecording()
-          debugLog("Sherpa KWS 已开始从麦克风读入")
 
           val intervalSamples = (0.1 * sampleRateInHz).toInt().coerceAtLeast(160)
           val buffer = ShortArray(intervalSamples)
@@ -479,11 +504,7 @@ class HotwordService : Service() {
   private fun maybeTriggerWakeSherpa(spottedKeyword: String) {
     val text = spottedKeyword.trim()
     if (text.isEmpty()) return
-    val now = System.currentTimeMillis()
-    if (now - lastHeardTextTraceAt >= 1200L) {
-      lastHeardTextTraceAt = now
-      debugLog("Sherpa 命中: \"$text\"")
-    }
+    debugLog("命中唤醒词: $text")
     dispatchWakeAndLaunch(text)
   }
 
@@ -611,12 +632,6 @@ class HotwordService : Service() {
       }.trim()
     if (text.isEmpty()) return
 
-    val now = System.currentTimeMillis()
-    if (now - lastHeardTextTraceAt >= 1200L) {
-      lastHeardTextTraceAt = now
-      debugLog("识别文本: \"$text\"")
-    }
-
     val normalizedText = normalizeForWakeMatch(text)
     val compactText = normalizedText.replace(" ", "")
     val matched =
@@ -628,7 +643,10 @@ class HotwordService : Service() {
               compactText.contains(normalizedWord.replace(" ", ""))
           )
       }
-    if (!matched) return
+    if (!matched) {
+      logWakeMiss(text)
+      return
+    }
 
     debugLog("命中唤醒词: $text")
     dispatchWakeAndLaunch(text)
@@ -636,22 +654,60 @@ class HotwordService : Service() {
   }
 
   private fun dispatchWakeAndLaunch(triggerLabel: String) {
+    val wakeEpoch = System.currentTimeMillis()
     debugLog("发送 WAKE_TRIGGERED 广播 ($triggerLabel)")
     sendBroadcast(
       Intent(actionWakeTriggered).setPackage(packageName).apply {
         putExtra(extraWakeTriggerLabel, triggerLabel)
-        putExtra(extraWakeTimeEpochMs, System.currentTimeMillis())
+        putExtra(extraWakeTimeEpochMs, wakeEpoch)
       },
     )
+    postWakeNotification(triggerLabel = triggerLabel, wakeEpochMs = wakeEpoch)
+  }
+
+  private fun postWakeNotification(triggerLabel: String, wakeEpochMs: Long) {
     try {
-      val launchIntent =
+      if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) {
+        debugLog("系统通知总开关关闭，无法展示唤醒通知")
+        return
+      }
+      val openIntent =
         Intent(this, MainActivity::class.java).apply {
-          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+          action = actionOpenFromHotwordNotification
+          addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+              Intent.FLAG_ACTIVITY_SINGLE_TOP or
+              Intent.FLAG_ACTIVITY_CLEAR_TOP,
+          )
+          putExtra(extraWakeTriggerLabel, triggerLabel)
+          putExtra(extraWakeTimeEpochMs, wakeEpochMs)
+          putExtra(extraWakeSource, wakeSourceHotword)
         }
-      startActivity(launchIntent)
+      val contentIntent =
+        PendingIntent.getActivity(
+          this,
+          1,
+          openIntent,
+          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+      val notification =
+        NotificationCompat.Builder(this, wakeEventChannelId)
+          .setSmallIcon(R.mipmap.ic_launcher)
+          .setContentTitle("唤醒成功")
+          .setContentText("已识别「$triggerLabel」，点击进入继续对话")
+          .setPriority(NotificationCompat.PRIORITY_MAX)
+          .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+          .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+          .setDefaults(NotificationCompat.DEFAULT_ALL)
+          .setAutoCancel(true)
+          .setContentIntent(contentIntent)
+          .addAction(R.mipmap.ic_launcher, "打开", contentIntent)
+          .build()
+      NotificationManagerCompat.from(this).notify(nextWakeEventNotificationId(wakeEpochMs), notification)
+      debugLog("唤醒通知状态：已发布，可点击进入应用")
     } catch (t: Throwable) {
-      debugLog("唤醒拉起应用失败: ${t.javaClass.simpleName}")
-      Log.w("HotwordService", "Failed to launch activity from hotword", t)
+      debugLog("唤醒通知状态：发布失败 ${t.javaClass.simpleName}")
+      Log.w("HotwordService", "Failed to post wake notification", t)
     }
   }
 
@@ -659,5 +715,15 @@ class HotwordService : Service() {
     val lowered = value.lowercase()
     val replaced = lowered.replace(Regex("[^a-z0-9\\s]"), " ")
     return replaced.replace(Regex("\\s+"), " ").trim()
+  }
+
+  private fun logWakeMiss(recognizedText: String) {
+    val message = "检测到语音但未匹配唤醒词: $recognizedText"
+    HotwordDebugLogger.logForce(message)
+    Log.i(wakeTraceTag, "HotwordService: $message")
+  }
+
+  private fun nextWakeEventNotificationId(wakeEpochMs: Long): Int {
+    return (wakeEpochMs and 0x7FFFFFFF).toInt().coerceAtLeast(1)
   }
 }

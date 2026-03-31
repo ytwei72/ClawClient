@@ -1,5 +1,6 @@
 package ai.openclaw.app
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -13,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import ai.openclaw.app.ui.RootScreen
 import ai.openclaw.app.ui.OpenClawTheme
+import ai.openclaw.app.voice.HotwordService
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -20,6 +22,7 @@ class MainActivity : ComponentActivity() {
   private lateinit var permissionRequester: PermissionRequester
   private var didAttachRuntimeUi = false
   private var didStartNodeService = false
+  private var pendingHotwordIntent: Intent? = null
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -59,15 +62,38 @@ class MainActivity : ComponentActivity() {
         }
       }
     }
+    pendingHotwordIntent = intent
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    pendingHotwordIntent = intent
+    if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+      handleHotwordIntent(pendingHotwordIntent)
+      pendingHotwordIntent = null
+    }
   }
 
   override fun onStart() {
     super.onStart()
     viewModel.setForeground(true)
+    handleHotwordIntent(pendingHotwordIntent)
+    pendingHotwordIntent = null
   }
 
   override fun onStop() {
     viewModel.setForeground(false)
     super.onStop()
+  }
+
+  private fun handleHotwordIntent(intent: Intent?) {
+    val input = intent ?: return
+    if (input.action != HotwordService.actionOpenFromHotwordNotification) return
+    viewModel.handleHotwordNotificationOpen(
+      triggerLabel = input.getStringExtra(HotwordService.extraWakeTriggerLabel),
+      wakeEpochMs = input.getLongExtra(HotwordService.extraWakeTimeEpochMs, -1L).takeIf { it > 0L },
+      wakeSource = input.getStringExtra(HotwordService.extraWakeSource),
+    )
   }
 }

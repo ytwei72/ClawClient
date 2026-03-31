@@ -16,6 +16,7 @@ import ai.openclaw.app.node.CameraCaptureManager
 import ai.openclaw.app.node.CanvasController
 import ai.openclaw.app.node.SmsManager
 import ai.openclaw.app.voice.HotwordDebugLogger
+import ai.openclaw.app.voice.HotwordService
 import ai.openclaw.app.voice.VoiceConversationEntry
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +32,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private val prefs = nodeApp.prefs
   private val runtimeRef = MutableStateFlow<NodeRuntime?>(null)
   private var foreground = true
+  private var lastHandledHotwordEpochMs: Long? = null
 
   private fun ensureRuntime(): NodeRuntime {
     runtimeRef.value?.let { return it }
@@ -256,6 +258,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun triggerHotwordWakeTest(): String {
     return ensureRuntime().triggerHotwordWakeTest()
+  }
+
+  fun handleHotwordNotificationOpen(triggerLabel: String?, wakeEpochMs: Long?, wakeSource: String?) {
+    if (wakeSource != HotwordService.wakeSourceHotword) return
+    if (!prefs.onboardingCompleted.value) return
+    if (wakeEpochMs != null && wakeEpochMs == lastHandledHotwordEpochMs) return
+    if (wakeEpochMs != null) {
+      lastHandledHotwordEpochMs = wakeEpochMs
+    }
+    ensureRuntime().handleHotwordNotificationOpen(triggerLabel = triggerLabel, wakeEpochMs = wakeEpochMs)
   }
 
   fun clearHotwordDebugLogs() {

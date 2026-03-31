@@ -15,6 +15,16 @@ object HotwordDebugLogger {
   val logs: StateFlow<List<String>> = _logs.asStateFlow()
 
   fun log(message: String) {
+    append(message = message)
+  }
+
+  fun logForce(message: String) {
+    append(message = message)
+  }
+
+  private fun append(message: String) {
+    val normalized = message.trim()
+    if (normalized.isEmpty()) return
     val entry = "[${timeFormat.format(Date())}] $message"
     _logs.value = (_logs.value + entry).takeLast(maxEntries)
   }

@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.SystemClock
 import android.util.Log
-import android.widget.Toast
 import androidx.core.content.ContextCompat
 import ai.openclaw.app.chat.ChatController
 import ai.openclaw.app.chat.ChatGatewayAgent
@@ -34,9 +33,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -70,13 +66,22 @@ class NodeRuntime(
   private val externalAudioCaptureActive = MutableStateFlow(false)
   private var hotwordRunning = false
   private var lastHotwordSessionKey: String? = null
+  private var lastAnnouncedHotwordRunning: Boolean? = null
   private val wakeTraceTag = "WakeTrace"
+  private var lastWakeTraceMessage: String? = null
+  private var lastWakeTraceAtMs: Long = 0L
   private val _selectVoiceTabRevision = MutableStateFlow(0)
   val selectVoiceTabRevision: StateFlow<Int> = _selectVoiceTabRevision.asStateFlow()
   private val _selectChatTabRevision = MutableStateFlow(0)
   val selectChatTabRevision: StateFlow<Int> = _selectChatTabRevision.asStateFlow()
 
   private fun traceWake(message: String, toDebugPanel: Boolean = true) {
+    val now = System.currentTimeMillis()
+    if (message == lastWakeTraceMessage && now - lastWakeTraceAtMs < 2000L) {
+      return
+    }
+    lastWakeTraceMessage = message
+    lastWakeTraceAtMs = now
     Log.i(wakeTraceTag, message)
     if (toDebugPanel) {
       HotwordDebugLogger.log(message)
@@ -409,14 +414,6 @@ class NodeRuntime(
             prefs.wakeWords.value.firstOrNull().orEmpty().ifEmpty { "（未知）" }
           }
         val epoch = intent.getLongExtra(HotwordService.extraWakeTimeEpochMs, System.currentTimeMillis())
-        scope.launch(Dispatchers.Main) {
-          val tf = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
-          Toast.makeText(
-            appContext,
-            "唤醒成功：「$trigger」· ${tf.format(Date(epoch))}",
-            Toast.LENGTH_LONG,
-          ).show()
-        }
         val activePage = _activeFeaturePage.value
         if (_isForeground.value) {
           when (activePage) {
@@ -432,9 +429,7 @@ class NodeRuntime(
           return
         }
         _selectChatTabRevision.value = _selectChatTabRevision.value + 1
-        traceWake("收到 WAKE_TRIGGERED（后台），拉起前台并切到聊天页，然后打开麦克风和扬声器")
-        setSpeakerEnabled(true)
-        setMicEnabled(true)
+        traceWake("收到 WAKE_TRIGGERED（后台），仅切到聊天页，等待前台后再由用户开启麦克风")
       }
     }
 
@@ -696,11 +691,24 @@ class NodeRuntime(
   }
 
   fun setForeground(value: Boolean) {
+    val wasForeground = _isForeground.value
     _isForeground.value = value
+    if (wasForeground == value) {
+      refreshHotwordServiceState()
+      return
+    }
     if (value) {
+      traceWake("前台状态切换：APP 进入前台")
       reconnectPreferredGatewayOnForeground()
     } else {
+      traceWake("前台状态切换：APP 进入后台，准备关闭会话麦克风")
       stopActiveVoiceSession()
+      traceWake("会话麦克风状态：已因后台切换关闭")
+      if (prefs.voiceWakeMode.value == VoiceWakeMode.Always) {
+        // Ensure hotword service is kept alive in background for Always mode.
+        hotwordRunning = false
+        traceWake("进入后台且为 always 模式，强制重评估并保持热词监听")
+      }
     }
     refreshHotwordServiceState()
   }
@@ -801,6 +809,10 @@ class NodeRuntime(
 
   fun setMicEnabled(value: Boolean) {
     traceWake("setMicEnabled(value=$value)")
+    if (value && !_isForeground.value) {
+      traceWake("会话麦克风状态：拒绝后台开麦请求（仅前台允许）")
+      return
+    }
     prefs.setTalkEnabled(value)
     if (value) {
       // Tapping mic on interrupts any active TTS (barge-in)
@@ -848,6 +860,15 @@ class NodeRuntime(
     return "测试已触发：已发送唤醒事件"
   }
 
+  fun handleHotwordNotificationOpen(triggerLabel: String?, wakeEpochMs: Long?) {
+    val trigger = triggerLabel?.trim().orEmpty().ifEmpty { "（未知）" }
+    val epoch = wakeEpochMs ?: System.currentTimeMillis()
+    traceWake("收到唤醒通知点击，来源=hotword，trigger=$trigger，time=$epoch")
+    _selectChatTabRevision.value = _selectChatTabRevision.value + 1
+    setSpeakerEnabled(true)
+    setMicEnabled(true)
+  }
+
   val speakerEnabled: StateFlow<Boolean>
     get() = prefs.speakerEnabled
 
@@ -887,6 +908,7 @@ class NodeRuntime(
     ).joinToString("|")
   }
 
+  @Synchronized
   private fun refreshHotwordServiceState() {
     val mode = prefs.voiceWakeMode.value
     val micBusy = prefs.talkEnabled.value
@@ -903,16 +925,23 @@ class NodeRuntime(
       "评估热词服务: mode=${mode.rawValue}, engine=${prefs.wakeEngine.value.rawValue}, foreground=${_isForeground.value}, micBusy=$micBusy, hasRecordAudio=$hasAudioPermission, shouldRun=$shouldRun, running=$hotwordRunning",
       toDebugPanel = false,
     )
+    if (mode == VoiceWakeMode.Always && !_isForeground.value && shouldRun) {
+      traceWake("热词服务状态：后台 Always 模式，要求保持运行", toDebugPanel = false)
+    }
 
     if (!shouldRun) {
       lastHotwordSessionKey = null
       if (!hotwordRunning) {
-        traceWake("热词服务应保持停止", toDebugPanel = false)
+        if (lastAnnouncedHotwordRunning != false) {
+          traceWake("热词服务状态：已停止")
+          lastAnnouncedHotwordRunning = false
+        }
         return
       }
-      traceWake("请求停止 HotwordService")
       HotwordService.stop(appContext)
       hotwordRunning = false
+      traceWake("热词服务状态：已停止")
+      lastAnnouncedHotwordRunning = false
       return
     }
 
@@ -927,12 +956,16 @@ class NodeRuntime(
       hotwordRunning = false
     }
 
-    hotwordRunning =
-      HotwordService.start(appContext, prefs.wakeWords.value, prefs.wakeEngine.value)
-    traceWake("请求启动 HotwordService，结果=$hotwordRunning")
+    hotwordRunning = HotwordService.start(appContext, prefs.wakeWords.value, prefs.wakeEngine.value)
     if (hotwordRunning) {
+      if (lastAnnouncedHotwordRunning != true) {
+        traceWake("热词服务状态：运行中")
+      }
+      lastAnnouncedHotwordRunning = true
       lastHotwordSessionKey = sessionKey
     } else {
+      traceWake("热词服务状态：启动失败")
+      lastAnnouncedHotwordRunning = false
       lastHotwordSessionKey = null
       prefs.setVoiceWakeMode(VoiceWakeMode.Off)
       traceWake("HotwordService 启动失败，自动回退到 off")
