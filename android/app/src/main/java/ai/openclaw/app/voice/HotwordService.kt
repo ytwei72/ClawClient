@@ -59,6 +59,8 @@ class HotwordService : Service() {
     private const val wakeEventChannelId = "openclaw_hotword_event_v2"
     private const val notificationId = 4001
     private const val sampleRate = 16_000.0f
+    private const val sherpaSpeechRmsThreshold = 0.015f
+    private const val sherpaSpeechTailSilenceMs = 700L
     private const val extraWords = "extra_words"
     private const val extraWakeEngine = "extra_wake_engine"
     private val requiredModelFiles =
@@ -436,6 +438,9 @@ class HotwordService : Service() {
     sherpaLoopJob =
       scope.launch(Dispatchers.IO) @androidx.annotation.RequiresPermission(android.Manifest.permission.RECORD_AUDIO) {
         var audioRecord: AudioRecord? = null
+        var speechSegmentActive = false
+        var speechSegmentHasHit = false
+        var lastSpeechAtMs = 0L
         try {
           val channelConfig = AudioFormat.CHANNEL_IN_MONO
           val audioFormat = AudioFormat.ENCODING_PCM_16BIT
@@ -467,11 +472,31 @@ class HotwordService : Service() {
             val n = ar.read(buffer, 0, buffer.size)
             if (n > 0) {
               val samples = FloatArray(n) { i -> buffer[i] / 32768.0f }
+              val now = System.currentTimeMillis()
+              val rms = samples.rmsLevel()
+              if (rms >= sherpaSpeechRmsThreshold) {
+                lastSpeechAtMs = now
+                if (!speechSegmentActive) {
+                  speechSegmentActive = true
+                  speechSegmentHasHit = false
+                }
+              } else if (
+                speechSegmentActive &&
+                  now - lastSpeechAtMs >= sherpaSpeechTailSilenceMs
+              ) {
+                if (!speechSegmentHasHit) {
+                  HotwordDebugLogger.log("检测到语音活动但未命中唤醒词（Sherpa）")
+                  Log.i(wakeTraceTag, "HotwordService: 检测到语音活动但未命中唤醒词（Sherpa）")
+                }
+                speechSegmentActive = false
+                speechSegmentHasHit = false
+              }
               stream.acceptWaveform(samples, sampleRateInHz)
               while (kws.isReady(stream)) {
                 kws.decode(stream)
                 val keyword = kws.getResult(stream).keyword.trim()
                 if (keyword.isNotEmpty()) {
+                  speechSegmentHasHit = true
                   kws.reset(stream)
                   maybeTriggerWakeSherpa(keyword)
                 }
@@ -725,5 +750,15 @@ class HotwordService : Service() {
 
   private fun nextWakeEventNotificationId(wakeEpochMs: Long): Int {
     return (wakeEpochMs and 0x7FFFFFFF).toInt().coerceAtLeast(1)
+  }
+
+  private fun FloatArray.rmsLevel(): Float {
+    if (isEmpty()) return 0f
+    var sum = 0.0
+    for (value in this) {
+      val v = value.toDouble()
+      sum += v * v
+    }
+    return kotlin.math.sqrt(sum / size).toFloat()
   }
 }
