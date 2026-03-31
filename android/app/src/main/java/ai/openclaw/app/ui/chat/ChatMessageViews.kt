@@ -2,7 +2,6 @@ package ai.openclaw.app.ui.chat
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,6 +71,12 @@ private data class ChatBubbleStyle(
 private enum class ToolPayloadKind {
   Call,
   Result,
+}
+
+/** 网关可能用独立 role（如 `toolResult`）承载工具回传，而 content 仍为 `type=text`，需与 `tool_result` 块同等琥珀样式。 */
+private fun isToolResultMessageRole(role: String): Boolean {
+  val r = role.trim().lowercase(Locale.US).replace('-', '_')
+  return r == "tool_result" || r == "toolresult"
 }
 
 private val numberedLineRegex = Regex("""^\d+[.)]\s+.*$""")
@@ -326,6 +332,14 @@ private fun ChatMessageBody(
           val text = part.text ?: continue
           if (isUser) {
             UserTextWithDebugToggle(rawText = text, textColor = textColor, stateKey = "$messageId:$idx")
+          } else if (isToolResultMessageRole(role)) {
+            AssistantToolCard(
+              part = part,
+              payloadKind = ToolPayloadKind.Result,
+              stateKey = "$messageId:$idx:text",
+              collapseLongText = assistantPartCollapse,
+              compactSingleLine = compactSingleLine,
+            )
           } else {
             AssistantTextCard(
               rawContentType = part.type,
@@ -611,36 +625,24 @@ private fun AssistantReasoningCard(
 }
 
 /**
- * 紫青 theme · tool_result 正文：文档琥珀内凹（不走 Markdown ```text```，避免围栏/内联样式仍呈青绿底）。
- * 色值对齐 《chat页对话气泡配色》 #FAEEDA / #EF9F27 体系。
+ * tool_result 正文「text」内凹块：配色取自 [partToolResult]（紫青下即《chat页对话气泡配色》琥珀 #FAEEDA / #EF9F27）。
+ * 不走 Markdown ```text```，避免围栏默认深色底；内凹底用 background 与 border 轻量 lerp 与外壳区分。
  */
 @Composable
-private fun VioletTealToolResultPlainBlock(body: String) {
-  val isDark = isSystemInDarkTheme()
-  val insetBg: Color
-  val insetBorder: Color
-  val fg: Color
-  if (!isDark) {
-    insetBg = Color(0xFFF5E4C8)
-    insetBorder = Color(0xFFEF9F27)
-    fg = Color(0xFF3D2E12)
-  } else {
-    insetBg = Color(0xFF4A3F2A)
-    insetBorder = Color(0xFFD4A535)
-    fg = Color(0xFFFFEED0)
-  }
+private fun ToolResultPlainBodyBlock(body: String, chrome: PartCardChrome) {
+  val insetBg = lerp(chrome.background, chrome.border, 0.10f)
   SelectionContainer(modifier = Modifier.fillMaxWidth()) {
     Surface(
       shape = RoundedCornerShape(8.dp),
       color = insetBg,
-      border = BorderStroke(1.dp, insetBorder),
+      border = BorderStroke(1.dp, chrome.border),
       modifier = Modifier.fillMaxWidth(),
     ) {
       Text(
         text = body.trimEnd(),
         style = mobileCallout,
         fontFamily = FontFamily.Monospace,
-        color = fg,
+        color = chrome.contentText,
         modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
       )
     }
@@ -686,10 +688,6 @@ private fun AssistantToolCard(
       ToolPayloadKind.Call -> theme.partToolCall
       ToolPayloadKind.Result -> theme.partToolResult
     }
-  /** JSON 围栏仅用于 tool_call（深色代码块）；tool_result 用 text 围栏（非紫青）或专用琥珀正文块（紫青）。 */
-  val fenceLang = if (payloadKind == ToolPayloadKind.Call) "json" else "text"
-  val useVioletTealToolResultPlain =
-    payloadKind == ToolPayloadKind.Result && theme.kind == ChatPageThemeKind.VioletTeal
 
   Surface(
     shape = theme.shapePartCard,
@@ -714,26 +712,26 @@ private fun AssistantToolCard(
       } else {
         meta?.let { Text(it, style = mobileCaption1, color = chrome.headerText, fontFamily = FontFamily.Monospace) }
         if (!collapseLongText) {
-          if (useVioletTealToolResultPlain) {
-            VioletTealToolResultPlainBlock(body = contentRaw)
-          } else {
-            ChatMarkdown(
-              text = "```$fenceLang\n$contentRaw\n```",
-              textColor = chrome.contentText,
-            )
+          when (payloadKind) {
+            ToolPayloadKind.Result -> ToolResultPlainBodyBlock(body = contentRaw, chrome = chrome)
+            ToolPayloadKind.Call ->
+              ChatMarkdown(
+                text = "```json\n$contentRaw\n```",
+                textColor = chrome.contentText,
+              )
           }
         } else {
           var expanded by rememberSaveable(stateKey) { mutableStateOf(false) }
           val needsCollapse = contentRaw.length > assistantCollapsedPreviewChars
           val contentDisplay =
             if (needsCollapse && !expanded) contentRaw.take(assistantCollapsedPreviewChars) + "…" else contentRaw
-          if (useVioletTealToolResultPlain) {
-            VioletTealToolResultPlainBlock(body = contentDisplay)
-          } else {
-            ChatMarkdown(
-              text = "```$fenceLang\n$contentDisplay\n```",
-              textColor = chrome.contentText,
-            )
+          when (payloadKind) {
+            ToolPayloadKind.Result -> ToolResultPlainBodyBlock(body = contentDisplay, chrome = chrome)
+            ToolPayloadKind.Call ->
+              ChatMarkdown(
+                text = "```json\n$contentDisplay\n```",
+                textColor = chrome.contentText,
+              )
           }
           if (needsCollapse) {
             TextButton(onClick = { expanded = !expanded }) {
