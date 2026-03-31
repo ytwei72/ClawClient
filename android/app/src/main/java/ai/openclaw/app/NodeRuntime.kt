@@ -73,6 +73,8 @@ class NodeRuntime(
   private val wakeTraceTag = "WakeTrace"
   private val _selectVoiceTabRevision = MutableStateFlow(0)
   val selectVoiceTabRevision: StateFlow<Int> = _selectVoiceTabRevision.asStateFlow()
+  private val _selectChatTabRevision = MutableStateFlow(0)
+  val selectChatTabRevision: StateFlow<Int> = _selectChatTabRevision.asStateFlow()
 
   private fun traceWake(message: String, toDebugPanel: Boolean = true) {
     Log.i(wakeTraceTag, message)
@@ -248,6 +250,7 @@ class NodeRuntime(
 
   private val _isForeground = MutableStateFlow(true)
   val isForeground: StateFlow<Boolean> = _isForeground.asStateFlow()
+  private val _activeFeaturePage = MutableStateFlow("connect")
 
   private var gatewayDefaultAgentId: String? = null
   private var gatewayAgents: List<GatewayAgentSummary> = emptyList()
@@ -406,7 +409,6 @@ class NodeRuntime(
             prefs.wakeWords.value.firstOrNull().orEmpty().ifEmpty { "（未知）" }
           }
         val epoch = intent.getLongExtra(HotwordService.extraWakeTimeEpochMs, System.currentTimeMillis())
-        _selectVoiceTabRevision.value = _selectVoiceTabRevision.value + 1
         scope.launch(Dispatchers.Main) {
           val tf = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
           Toast.makeText(
@@ -415,7 +417,23 @@ class NodeRuntime(
             Toast.LENGTH_LONG,
           ).show()
         }
-        traceWake("收到 WAKE_TRIGGERED 广播，识别「$trigger」，准备打开麦克风")
+        val activePage = _activeFeaturePage.value
+        if (_isForeground.value) {
+          when (activePage) {
+            "voice", "chat" -> {
+              traceWake("收到 WAKE_TRIGGERED（前台/$activePage），打开麦克风和扬声器并进入拾音")
+              setSpeakerEnabled(true)
+              setMicEnabled(true)
+            }
+            else -> {
+              traceWake("收到 WAKE_TRIGGERED（前台/$activePage），不自动进入拾音")
+            }
+          }
+          return
+        }
+        _selectChatTabRevision.value = _selectChatTabRevision.value + 1
+        traceWake("收到 WAKE_TRIGGERED（后台），拉起前台并切到聊天页，然后打开麦克风和扬声器")
+        setSpeakerEnabled(true)
         setMicEnabled(true)
       }
     }
@@ -685,6 +703,12 @@ class NodeRuntime(
       stopActiveVoiceSession()
     }
     refreshHotwordServiceState()
+  }
+
+  fun setActiveFeaturePage(page: String) {
+    val normalized = page.trim().lowercase()
+    if (normalized.isEmpty()) return
+    _activeFeaturePage.value = normalized
   }
 
   private fun seedLastDiscoveredGateway(list: List<GatewayEndpoint>) {

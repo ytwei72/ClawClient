@@ -100,6 +100,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val wakeWords: StateFlow<List<String>> = prefs.wakeWords
   val hotwordDebugLogs: StateFlow<List<String>> = HotwordDebugLogger.logs
   val selectVoiceTabRevision: StateFlow<Int> = runtimeState(0) { it.selectVoiceTabRevision }
+  val selectChatTabRevision: StateFlow<Int> = runtimeState(0) { it.selectChatTabRevision }
 
   val micCooldown: StateFlow<Boolean> = runtimeState(initial = false) { it.micCooldown }
   val micStatusText: StateFlow<String> = runtimeState(initial = "麦克风关") { it.micStatusText }
@@ -223,6 +224,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setVoiceScreenActive(active: Boolean) {
     ensureRuntime().setVoiceScreenActive(active)
+  }
+
+  fun setActiveFeaturePage(page: String) {
+    ensureRuntime().setActiveFeaturePage(page)
   }
 
   fun setMicEnabled(enabled: Boolean) {

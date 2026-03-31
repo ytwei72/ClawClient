@@ -83,8 +83,10 @@ fun PostOnboardingTabs(viewModel: MainViewModel, modifier: Modifier = Modifier) 
   // Stop TTS when user navigates away from voice tab, and lazily keep the Chat/Screen tabs
   // alive after the first visit so repeated tab switches do not rebuild their UI trees.
   val selectVoiceTabRevision by viewModel.selectVoiceTabRevision.collectAsState()
+  val selectChatTabRevision by viewModel.selectChatTabRevision.collectAsState()
 
   LaunchedEffect(activeTab) {
+    viewModel.setActiveFeaturePage(activeTab.toRuntimePageKey())
     viewModel.setVoiceScreenActive(activeTab == HomeTab.Voice)
     if (activeTab == HomeTab.Chat) {
       chatTabStarted = true
@@ -97,6 +99,13 @@ fun PostOnboardingTabs(viewModel: MainViewModel, modifier: Modifier = Modifier) 
   LaunchedEffect(selectVoiceTabRevision) {
     if (selectVoiceTabRevision > 0) {
       activeTab = HomeTab.Voice
+    }
+  }
+
+  LaunchedEffect(selectChatTabRevision) {
+    if (selectChatTabRevision > 0) {
+      activeTab = HomeTab.Chat
+      chatTabStarted = true
     }
   }
 
@@ -406,6 +415,15 @@ private fun toAgentSessionKey(agentId: String): String {
   val id = agentId.trim()
   return if (id.isEmpty()) "main" else "agent:$id:main"
 }
+
+private fun HomeTab.toRuntimePageKey(): String =
+  when (this) {
+    HomeTab.Connect -> "connect"
+    HomeTab.Chat -> "chat"
+    HomeTab.Voice -> "voice"
+    HomeTab.Screen -> "screen"
+    HomeTab.Settings -> "settings"
+  }
 
 @Composable
 private fun BottomTabBar(
