@@ -66,6 +66,8 @@ private data class ChatBubbleStyle(
   val borderColor: Color,
   val roleColor: Color,
   val shape: RoundedCornerShape,
+  /** 顶栏时间与用户「完整输入」链色（用户气泡可由主题 [RoleBubbleChrome.metaText] 指定）。 */
+  val headerMetaColor: Color,
 )
 
 private enum class ToolPayloadKind {
@@ -168,8 +170,61 @@ fun ChatMessageBubble(message: ChatMessage, assistantLabel: String) {
       else -> roleCardTitle(listOf(message))
     }
 
-  ChatBubbleContainer(style = style, roleLabel = roleLabelText, timestampMs = message.timestampMs) {
-    ChatMessageBody(content = displayableContent, textColor = mobileText, role = role, messageId = message.id)
+  val bodyTextColor =
+    if (role == "user") {
+      theme.userBubble.contentText ?: mobileText
+    } else {
+      mobileText
+    }
+
+  val userTextDebugIndices =
+    displayableContent.mapIndexedNotNull { idx, part ->
+      val t = part.text ?: return@mapIndexedNotNull null
+      val pt = part.type.trim().lowercase(Locale.US)
+      if (pt != "text") return@mapIndexedNotNull null
+      if (extractUserVisibleInput(t) != t) idx else null
+    }
+  val singleUserTextDebugIndex = userTextDebugIndices.singleOrNull()
+  var userInputShowRaw by rememberSaveable(message.id) { mutableStateOf(false) }
+  val userHeaderTrailing: (@Composable RowScope.() -> Unit)? =
+    if (role == "user" && singleUserTextDebugIndex != null) {
+      {
+        TextButton(
+          onClick = { userInputShowRaw = !userInputShowRaw },
+          contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+        ) {
+          Text(
+            text = userInputToggleLabel(userInputShowRaw),
+            style = mobileCaption1,
+            color = style.headerMetaColor,
+          )
+        }
+      }
+    } else {
+      null
+    }
+
+  ChatBubbleContainer(
+    style = style,
+    roleLabel = roleLabelText,
+    timestampMs = message.timestampMs,
+    headerTrailing = userHeaderTrailing,
+  ) {
+    ChatMessageBody(
+      content = displayableContent,
+      textColor = bodyTextColor,
+      role = role,
+      messageId = message.id,
+      userBubbleMetaColor = style.headerMetaColor,
+      hoistedUserDebugPartIndex = if (role == "user") singleUserTextDebugIndex else null,
+      hoistedUserDebugShowRaw = userInputShowRaw,
+      onHoistedUserDebugShowRawChange =
+        if (role == "user" && singleUserTextDebugIndex != null) {
+          { v -> userInputShowRaw = v }
+        } else {
+          null
+        },
+    )
   }
 }
 
@@ -275,8 +330,8 @@ private fun ChatBubbleContainer(
       modifier = Modifier.fillMaxWidth(0.90f),
     ) {
       Column(
-        modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
       ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -300,7 +355,7 @@ private fun ChatBubbleContainer(
               Text(
                 text = formatMessageTime(it),
                 style = mobileCaption2,
-                color = mobileTextSecondary,
+                color = style.headerMetaColor,
               )
             }
           }
@@ -321,6 +376,12 @@ private fun ChatMessageBody(
   assistantPartCollapse: Boolean = true,
   /** 最外层回合折叠时，每块类型卡片仅用一行摘要展示。 */
   compactSingleLine: Boolean = false,
+  /** 用户气泡顶栏/内联次要链色（与 [ChatBubbleStyle.headerMetaColor] 一致）。 */
+  userBubbleMetaColor: Color = mobileTextSecondary,
+  /** 唯一一段「可切换完整输入」时，切换状态提升到顶栏；与索引对应。 */
+  hoistedUserDebugPartIndex: Int? = null,
+  hoistedUserDebugShowRaw: Boolean = false,
+  onHoistedUserDebugShowRawChange: ((Boolean) -> Unit)? = null,
 ) {
   val isUser = role.trim().equals("user", ignoreCase = true)
 
@@ -331,7 +392,17 @@ private fun ChatMessageBody(
         "text" -> {
           val text = part.text ?: continue
           if (isUser) {
-            UserTextWithDebugToggle(rawText = text, textColor = textColor, stateKey = "$messageId:$idx")
+            val hoisted =
+              hoistedUserDebugPartIndex == idx &&
+                onHoistedUserDebugShowRawChange != null
+            UserTextWithDebugToggle(
+              rawText = text,
+              textColor = textColor,
+              stateKey = "$messageId:$idx",
+              hoistShowRaw = if (hoisted) hoistedUserDebugShowRaw else null,
+              onHoistShowRaw = if (hoisted) onHoistedUserDebugShowRawChange else null,
+              linkColor = userBubbleMetaColor,
+            )
           } else if (isToolResultMessageRole(role)) {
             AssistantToolCard(
               part = part,
@@ -383,27 +454,47 @@ private fun ChatMessageBody(
 }
 
 @Composable
-private fun UserTextWithDebugToggle(rawText: String, textColor: Color, stateKey: String) {
-  var showRaw by rememberSaveable(stateKey) { mutableStateOf(false) }
+private fun UserTextWithDebugToggle(
+  rawText: String,
+  textColor: Color,
+  stateKey: String,
+  hoistShowRaw: Boolean? = null,
+  onHoistShowRaw: ((Boolean) -> Unit)? = null,
+  linkColor: Color = mobileTextSecondary,
+) {
+  val isHoisted = hoistShowRaw != null && onHoistShowRaw != null
+  var internalShowRaw by rememberSaveable(stateKey) { mutableStateOf(false) }
+  val showRaw = if (isHoisted) hoistShowRaw!! else internalShowRaw
+  val setShowRaw: (Boolean) -> Unit = { v ->
+    if (isHoisted) onHoistShowRaw!!(v) else internalShowRaw = v
+  }
   val sanitized = extractUserVisibleInput(rawText)
   val displayText = if (showRaw) rawText else sanitized
 
   Box(modifier = Modifier.fillMaxWidth()) {
     ChatMarkdown(text = displayText, textColor = textColor)
-    if (sanitized != rawText) {
+    if (sanitized != rawText && !isHoisted) {
       TextButton(
-        onClick = { showRaw = !showRaw },
+        onClick = { setShowRaw(!showRaw) },
         modifier = Modifier.align(Alignment.TopEnd),
       ) {
         Text(
-          text = if (showRaw) "显示净化文本" else "调试展开",
+          text = userInputToggleLabel(showRaw),
           style = mobileCaption1,
-          color = mobileTextSecondary,
+          color = linkColor,
         )
       }
     }
   }
 }
+
+/** 用户气泡：网关净化前后切换文案（默认展示「发送内容」视角）。 */
+private fun userInputToggleLabel(showFullRaw: Boolean): String =
+  if (showFullRaw) {
+    "显示发送内容"
+  } else {
+    "查看完整输入"
+  }
 
 /** 类型卡片标题：展示网关 content 的 `type` 原文（仅 trim）。 */
 @Composable
@@ -625,7 +716,7 @@ private fun AssistantReasoningCard(
 }
 
 /**
- * tool_result 正文「text」内凹块：配色取自 [partToolResult]（紫青下即《chat页对话气泡配色》琥珀 #FAEEDA / #EF9F27）。
+ * tool_result 正文「text」内凹块：配色取自 [partToolResult]（SemanticViolet 下即《chat页对话气泡配色》琥珀 #FAEEDA / #EF9F27）。
  * 不走 Markdown ```text```，避免围栏默认深色底；内凹底用 background 与 border 轻量 lerp 与外壳区分。
  */
 @Composable
@@ -955,6 +1046,7 @@ fun ChatStreamingAssistantBubble(text: String, assistantLabel: String) {
   }
 }
 
+@Composable
 private fun bubbleStyle(role: String, theme: ChatBubbleThemeTokens): ChatBubbleStyle {
   val r = role.trim().lowercase(Locale.US)
   val shape =
@@ -965,12 +1057,18 @@ private fun bubbleStyle(role: String, theme: ChatBubbleThemeTokens): ChatBubbleS
       "system" -> theme.systemBubble
       else -> theme.assistantBubble
     }
+  val headerMetaColor =
+    when (r) {
+      "user" -> chrome.metaText ?: mobileTextSecondary
+      else -> mobileTextSecondary
+    }
   return ChatBubbleStyle(
     alignEnd = r == "user",
     containerColor = chrome.container,
     borderColor = chrome.border,
     roleColor = chrome.roleLabel,
     shape = shape,
+    headerMetaColor = headerMetaColor,
   )
 }
 

@@ -1,25 +1,38 @@
 package ai.openclaw.app.ui.chat
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import ai.openclaw.app.chat.ChatMessage
 import ai.openclaw.app.chat.ChatPendingToolCall
 import java.util.Locale
+import kotlin.math.abs
+import kotlinx.coroutines.launch
 import ai.openclaw.app.ui.mobileBorder
 import ai.openclaw.app.ui.mobileCallout
 import ai.openclaw.app.ui.mobileCardSurface
@@ -78,6 +91,113 @@ private fun groupMessagesForChatList(messagesOldestFirst: List<ChatMessage>): Li
   return rowsChrono.asReversed()
 }
 
+private fun lazyListHeaderItemCount(
+  stream: String?,
+  pendingToolCalls: List<*>,
+  pendingRunCount: Int,
+): Int {
+  var n = 0
+  if (!stream.isNullOrBlank()) n++
+  if (pendingToolCalls.isNotEmpty()) n++
+  if (pendingRunCount > 0) n++
+  return n
+}
+
+/** [listRows] 与 LazyColumn `items` 顺序一致（新消息在前）；返回各用户气泡在 LazyColumn 中的 index。 */
+private fun userMessageLazyIndices(
+  listRows: List<ChatListRow>,
+  headerItemCount: Int,
+): List<Int> =
+  listRows.mapIndexedNotNull { i, row ->
+    if (row is ChatListRow.Single) {
+      val r = row.message.role.trim().lowercase(Locale.US)
+      if (r == "user") headerItemCount + i else null
+    } else {
+      null
+    }
+  }
+
+/**
+ * reverseLayout 列表中 index 较小者更靠近窗口底部（更新）。锚定视口内用户条，↑ 跳到更早的用户（更大 index），↓ 跳到更新的用户（更小 index）。
+ */
+private fun anchorUserLazyIndex(
+  layoutInfo: LazyListLayoutInfo,
+  userIndices: List<Int>,
+): Int? {
+  if (userIndices.isEmpty()) return null
+  val sorted = userIndices.sorted()
+  val set = sorted.toSet()
+  val vis = layoutInfo.visibleItemsInfo
+  if (vis.isEmpty()) return sorted[sorted.size / 2]
+  val visibleUsers = vis.map { it.index }.filter { it in set }.sorted()
+  if (visibleUsers.isNotEmpty()) {
+    return visibleUsers[visibleUsers.size / 2]
+  }
+  val minV = vis.minOf { it.index }
+  val maxV = vis.maxOf { it.index }
+  val center = (minV + maxV) / 2
+  return sorted.minByOrNull { abs(it - center) } ?: sorted.first()
+}
+
+@Composable
+private fun UserTurnJumpCapsule(
+  listState: LazyListState,
+  userLazyIndices: List<Int>,
+  modifier: Modifier = Modifier,
+) {
+  if (userLazyIndices.size < 2) return
+  val scope = rememberCoroutineScope()
+  @Suppress("UNUSED_VARIABLE")
+  val scrollWatch = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+  val sorted = userLazyIndices.sorted()
+  val anchor = anchorUserLazyIndex(listState.layoutInfo, sorted) ?: sorted.first()
+  val canOlder = sorted.any { it > anchor }
+  val canNewer = sorted.any { it < anchor }
+
+  Surface(
+    modifier = modifier,
+    shape = RoundedCornerShape(28.dp),
+    color = mobileCardSurface.copy(alpha = 0.94f),
+    border = BorderStroke(1.dp, mobileBorder),
+    tonalElevation = 2.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Column(
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.Center,
+    ) {
+      IconButton(
+        onClick = {
+          val a = anchorUserLazyIndex(listState.layoutInfo, sorted) ?: return@IconButton
+          val target = sorted.filter { it > a }.minOrNull() ?: return@IconButton
+          scope.launch { listState.animateScrollToItem(target) }
+        },
+        enabled = canOlder,
+        modifier = Modifier.size(40.dp),
+      ) {
+        Icon(
+          imageVector = Icons.Filled.KeyboardArrowUp,
+          contentDescription = "上一条用户消息",
+        )
+      }
+      IconButton(
+        onClick = {
+          val a = anchorUserLazyIndex(listState.layoutInfo, sorted) ?: return@IconButton
+          val target = sorted.filter { it < a }.maxOrNull() ?: return@IconButton
+          scope.launch { listState.animateScrollToItem(target) }
+        },
+        enabled = canNewer,
+        modifier = Modifier.size(40.dp),
+      ) {
+        Icon(
+          imageVector = Icons.Filled.KeyboardArrowDown,
+          contentDescription = "下一条用户消息",
+        )
+      }
+    }
+  }
+}
+
 @Composable
 fun ChatMessageListCard(
   messages: List<ChatMessage>,
@@ -91,6 +211,12 @@ fun ChatMessageListCard(
   val listState = rememberLazyListState()
   val listRows = remember(messages) { groupMessagesForChatList(messages) }
   val stream = streamingAssistantText?.trim()
+  val headerCount =
+    remember(stream, pendingToolCalls, pendingRunCount) {
+      lazyListHeaderItemCount(stream, pendingToolCalls, pendingRunCount)
+    }
+  val userLazyIndices =
+    remember(listRows, headerCount) { userMessageLazyIndices(listRows, headerCount) }
 
   // New list items/tool rows should animate into view, but token streaming should not restart
   // that animation on every delta.
@@ -151,6 +277,15 @@ fun ChatMessageListCard(
     if (messages.isEmpty() && pendingRunCount == 0 && pendingToolCalls.isEmpty() && streamingAssistantText.isNullOrBlank()) {
       EmptyChatHint(modifier = Modifier.align(Alignment.Center), healthOk = healthOk)
     }
+
+    UserTurnJumpCapsule(
+      listState = listState,
+      userLazyIndices = userLazyIndices,
+      modifier =
+        Modifier
+          .align(Alignment.CenterEnd)
+          .padding(end = 2.dp),
+    )
   }
 }
 

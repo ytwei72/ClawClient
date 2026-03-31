@@ -52,15 +52,17 @@ import ai.openclaw.app.ui.mobileTextTertiary
 import ai.openclaw.app.ui.mobileWarning
 
 /**
- * Chat 页气泡配色方案。
- * - [BlueHarmony]：应用主色蓝调的柔和语义色（user / assistant / part 的 lerp）。
- * - [VioletTeal]：紫（用户）+ 青绿（助手正文）+ 琥珀（工具结果），见《chat页对话气泡配色》。
+ * Chat 页气泡配色方案（与设计文档《chat页对话气泡配色》方案 B 一致）。
+ * - [LegacyBlue]：经典蓝韵 — 应用主色蓝调的柔和语义色（user / assistant / part 的 lerp）。
+ * - [SemanticViolet]：语义紫青 — 紫（用户）+ 青绿（助手正文）+ 琥珀（工具结果），见该文档「语义紫青」章节。
+ * - [WarmStudio]：燕麦赭韵 — 赭橙用户实心、暖米助手与 part 层次，见《chat页对话气泡配色》「燕麦赭韵」章节。
  */
 enum class ChatPageThemeKind(
   val label: String,
 ) {
-  BlueHarmony("蓝韵"),
-  VioletTeal("紫青"),
+  LegacyBlue("经典蓝韵"),
+  SemanticViolet("语义紫青"),
+  WarmStudio("燕麦赭韵"),
 }
 
 @Immutable
@@ -68,6 +70,10 @@ data class RoleBubbleChrome(
   val container: Color,
   val border: Color,
   val roleLabel: Color,
+  /** 气泡内 Markdown 正文色；null 时使用应用全局正文色。 */
+  val contentText: Color? = null,
+  /** 用户气泡顶栏时间、原文切换等次要文案；null 时用全局 secondary。 */
+  val metaText: Color? = null,
 )
 
 @Immutable
@@ -186,7 +192,7 @@ fun chatBubbleThemeTokens(theme: ChatPageThemeKind): ChatBubbleThemeTokens {
     )
 
   return when (theme) {
-    ChatPageThemeKind.BlueHarmony ->
+    ChatPageThemeKind.LegacyBlue ->
       ChatBubbleThemeTokens(
         kind = theme,
         shapeBubbleUser = shapeDefaultBubble,
@@ -262,7 +268,7 @@ fun chatBubbleThemeTokens(theme: ChatPageThemeKind): ChatBubbleThemeTokens {
         composer = composerDefault,
       )
 
-    ChatPageThemeKind.VioletTeal ->
+    ChatPageThemeKind.SemanticViolet ->
       if (!isDark) {
         val userFill = Color(0xFFEEEDFE)
         val userStroke = Color(0xFF534AB7)
@@ -436,6 +442,199 @@ fun chatBubbleThemeTokens(theme: ChatPageThemeKind): ChatBubbleThemeTokens {
               attachmentRemoveBorder = Color(0xFF4A4D56),
               dropdownBg = Color(0xFF2E3038),
               dropdownBorder = Color(0xFF4A4D56),
+            ),
+        )
+      }
+
+    ChatPageThemeKind.WarmStudio ->
+      if (!isDark) {
+        val ochre = Color(0xFFCC785C)
+        val ochreStroke = Color(0xFFB86A4E)
+        val brownAccent = Color(0xFF6B5344)
+        val assistantShellFill = Color(0xFFF5F0EB)
+        val assistantShellBorder = Color(0xFFE0D4C8)
+        ChatBubbleThemeTokens(
+          kind = theme,
+          shapeBubbleUser = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomEnd = 4.dp, bottomStart = 12.dp),
+          shapeBubbleAssistant = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomEnd = 12.dp, bottomStart = 4.dp),
+          shapePartCard = partShape,
+          userBubble =
+            RoleBubbleChrome(
+              container = ochre,
+              border = ochreStroke,
+              roleLabel = Color.White,
+              contentText = Color.White,
+              metaText = Color.White.copy(alpha = 0.88f),
+            ),
+          systemBubble =
+            RoleBubbleChrome(
+              Color(0xFFFFF4EC),
+              Color(0xFFE8D4BC),
+              Color(0xFF9A6B3A),
+            ),
+          assistantBubble = RoleBubbleChrome(assistantShellFill, assistantShellBorder, brownAccent),
+          partText =
+            PartCardChrome(
+              background = Color(0xFFF5EDE4),
+              border = Color(0xFFC4A88F),
+              contentText = Color(0xFF2C2218),
+              headerText = Color(0xFF7A5E48),
+            ),
+          partImage =
+            PartCardChrome(
+              background = Color(0xFFEDE6DC),
+              border = Color(0xFFB08F72),
+              contentText = Color(0xFF2C2218),
+              headerText = Color(0xFF7A5E48),
+            ),
+          partReasoning =
+            PartCardChrome(
+              background = Color(0xFFF7F1EA),
+              border = Color(0xFFC4A990),
+              borderDashed = true,
+              contentText = Color(0xFF5C4E42),
+              headerText = Color(0xFF8B7A6A),
+              bodyItalic = true,
+            ),
+          partToolCall =
+            PartCardChrome(
+              background = Color(0xFF1E1611),
+              border = Color(0xFF3D342A),
+              contentText = Color(0xFFEAE2D8),
+              headerText = Color(0xFFB5A898),
+            ),
+          partToolResult =
+            PartCardChrome(
+              background = Color(0xFFFBF3E4),
+              border = Color(0xFFD4A850),
+              contentText = Color(0xFF3D2E12),
+              headerText = Color(0xFFB07A1A),
+            ),
+          partMeta =
+            PartCardChrome(
+              background = Color(0xFFEFEBE6),
+              border = Color(0xFFA89888),
+              contentText = Color(0xFF2E2A26),
+              headerText = Color(0xFF6E6258),
+            ),
+          streamingAccentBorder = ochre,
+          composer =
+            ComposerThemeChrome(
+              textFieldBg = Color(0xFFF5F0EB),
+              textFieldBorderFocused = ochre,
+              textFieldBorderUnfocused = Color(0xFFD4C4B8),
+              sendBg = ochre,
+              sendContent = Color.White,
+              sendBorder = ochreStroke,
+              sendBorderDisabled = Color(0xFFC9B8A8),
+              sendDisabledBg = Color(0xFFE5DBD2),
+              secondaryBg = Color(0xFFEFEBE6),
+              secondaryBorder = Color(0xFFC9B8A8),
+              secondaryContent = Color(0xFF5C4E42),
+              thinkingMenuBg = Color(0xFFEFEBE6),
+              thinkingMenuBorder = Color(0xFFC9B8A8),
+              attachmentChipBg = Color(0xFFF0E5DC),
+              attachmentChipBorder = Color(0xFFC4A88F),
+              attachmentRemoveBg = Color(0xFFE8DFD6),
+              attachmentRemoveBorder = Color(0xFFC9B8A8),
+              dropdownBg = Color(0xFFF7F3EF),
+              dropdownBorder = Color(0xFFD4C4B8),
+            ),
+        )
+      } else {
+        val ochreFill = Color(0xFF5C3D32)
+        val ochreStroke = Color(0xFFD4A088)
+        val userLabel = Color(0xFFFFD4C4)
+        val warmBody = Color(0xFFFFF8F4)
+        val brownAccent = Color(0xFFE8C4A8)
+        val assistantShellFill = Color(0xFF2A2420)
+        val assistantShellBorder = Color(0xFF453D36)
+        ChatBubbleThemeTokens(
+          kind = theme,
+          shapeBubbleUser = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomEnd = 4.dp, bottomStart = 12.dp),
+          shapeBubbleAssistant = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomEnd = 12.dp, bottomStart = 4.dp),
+          shapePartCard = partShape,
+          userBubble =
+            RoleBubbleChrome(
+              container = ochreFill,
+              border = ochreStroke,
+              roleLabel = userLabel,
+              contentText = warmBody,
+              metaText = warmBody.copy(alpha = 0.78f),
+            ),
+          systemBubble =
+            RoleBubbleChrome(
+              Color(0xFF3A2E24),
+              Color(0xFF7A5E48),
+              Color(0xFFFFD8A8),
+            ),
+          assistantBubble = RoleBubbleChrome(assistantShellFill, assistantShellBorder, brownAccent),
+          partText =
+            PartCardChrome(
+              background = Color(0xFF3A322C),
+              border = Color(0xFF8B7355),
+              contentText = Color(0xFFF5EDE4),
+              headerText = Color(0xFFD4BCA8),
+            ),
+          partImage =
+            PartCardChrome(
+              background = Color(0xFF342C27),
+              border = Color(0xFF7F6A56),
+              contentText = Color(0xFFF5EDE4),
+              headerText = Color(0xFFD4BCA8),
+            ),
+          partReasoning =
+            PartCardChrome(
+              background = Color(0xFF383028),
+              border = Color(0xFF8B7868),
+              borderDashed = true,
+              contentText = Color(0xFFC8B8A8),
+              headerText = Color(0xFFAB9A8A),
+              bodyItalic = true,
+            ),
+          partToolCall =
+            PartCardChrome(
+              background = Color(0xFF12100E),
+              border = Color(0xFF3D342A),
+              contentText = Color(0xFFEAE2D8),
+              headerText = Color(0xFF9A8B7C),
+            ),
+          partToolResult =
+            PartCardChrome(
+              background = Color(0xFF3A3220),
+              border = Color(0xFFD4A850),
+              contentText = Color(0xFFFFEED8),
+              headerText = Color(0xFFF5C96A),
+            ),
+          partMeta =
+            PartCardChrome(
+              background = Color(0xFF36302A),
+              border = Color(0xFF7A6E62),
+              contentText = Color(0xFFE8E0D8),
+              headerText = Color(0xFFBCB0A4),
+            ),
+          streamingAccentBorder = Color(0xFFE8A080),
+          composer =
+            ComposerThemeChrome(
+              textFieldBg = Color(0xFF332C28),
+              textFieldBorderFocused = ochreStroke,
+              textFieldBorderUnfocused = Color(0xFF554840),
+              sendBg = ochreFill,
+              sendContent = warmBody,
+              sendBorder = ochreStroke,
+              sendBorderDisabled = Color(0xFF454038),
+              sendDisabledBg = Color(0xFF3A3430),
+              secondaryBg = Color(0xFF383028),
+              secondaryBorder = Color(0xFF554840),
+              secondaryContent = Color(0xFFC8B8A8),
+              thinkingMenuBg = Color(0xFF383028),
+              thinkingMenuBorder = Color(0xFF554840),
+              attachmentChipBg = Color(0xFF3D322C),
+              attachmentChipBorder = Color(0xFF6B5A4A),
+              attachmentRemoveBg = Color(0xFF403830),
+              attachmentRemoveBorder = Color(0xFF554840),
+              dropdownBg = Color(0xFF383028),
+              dropdownBorder = Color(0xFF554840),
             ),
         )
       }

@@ -123,7 +123,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     runtimeState(initial = emptyList()) { it.chatGatewayAgents }
   val pendingRunCount: StateFlow<Int> = runtimeState(initial = 0) { it.pendingRunCount }
 
-  private val _chatPageThemeKind = MutableStateFlow(ChatPageThemeKind.VioletTeal)
+  private val _chatPageThemeKind = MutableStateFlow(ChatPageThemeKind.WarmStudio)
   val chatPageThemeKind: StateFlow<ChatPageThemeKind> = _chatPageThemeKind
 
   init {
